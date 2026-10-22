@@ -17,7 +17,7 @@ mod updater;
 
 use std::time::Duration;
 
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub fn run() {
     let paths = paths::AppPaths::detect();
@@ -28,6 +28,15 @@ pub fn run() {
     scan::import_legacy_summary(&paths, &app_state);
 
     tauri::Builder::default()
+        // Opening the app while it's already running brings the open window
+        // forward instead of starting a second copy. This must be the first plugin.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![

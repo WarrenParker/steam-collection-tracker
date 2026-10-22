@@ -282,6 +282,10 @@
               <dd>{num(catalog.games_listed)}</dd>
               <dt>Owned</dt>
               <dd>{num(catalog.games_owned)}</dd>
+              <dt title="Owned games that have any collectible items: cards, emoticons, backgrounds or Points Shop items">
+                Owned games with items
+              </dt>
+              <dd>{num(catalog.owned_with_items)} of {num(catalog.games_owned)}</dd>
               <dt
                 title="Games you have cards, items or badges for but don't own. Steam sale events show up here too."
               >
@@ -330,6 +334,16 @@
         <section>
           <h2>Your account</h2>
           <dl class="facts">
+            {#if catalog && catalog.ach_games > 0}
+              <dt title="The average completion of games you've unlocked at least one achievement in, the way Steam counts it">
+                Average achievement completion
+              </dt>
+              <dd>{catalog.ach_average !== null ? `${catalog.ach_average.toFixed(1)}%` : '–'}</dd>
+              <dt>Achievements unlocked</dt>
+              <dd>{num(catalog.ach_unlocked)} of {num(catalog.ach_total)}</dd>
+              <dt>Perfect games</dt>
+              <dd>{num(catalog.ach_perfect)} of {num(catalog.ach_games)}</dd>
+            {/if}
             <dt>Foil cards</dt>
             <dd>{num(scan.foil_cards)}</dd>
             <dt>Steam level</dt>

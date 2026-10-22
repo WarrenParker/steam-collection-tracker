@@ -5,14 +5,15 @@
 
   let { steamId }: { steamId: string | null } = $props();
 
-  type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'cards';
-  type SortKey = 'name' | 'cards' | 'items' | 'yours' | 'badge';
+  type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'items' | 'cards';
+  type SortKey = 'name' | 'cards' | 'items' | 'yours' | 'badge' | 'achievements';
 
   const filters: { value: Filter; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'owned', label: 'Owned' },
     { value: 'unowned', label: 'Unowned' },
     { value: 'family', label: 'Family' },
+    { value: 'items', label: 'With items' },
     { value: 'cards', label: 'With cards' },
   ];
 
@@ -29,6 +30,7 @@
     owned: games.filter((g) => g.owned).length,
     unowned: games.filter((g) => !g.owned && !g.family).length,
     family: games.filter((g) => !g.owned && g.family).length,
+    items: games.filter((g) => g.items > 0).length,
     cards: games.filter((g) => g.has_cards === true).length,
   });
 
@@ -43,6 +45,8 @@
           return !g.owned && !g.family;
         case 'family':
           return !g.owned && g.family;
+        case 'items':
+          return g.items > 0;
         case 'cards':
           return g.has_cards === true;
         default:
@@ -59,6 +63,8 @@
           return g.your_items;
         case 'badge':
           return (g.badge_level ?? -1) + (g.foil_badge ? 0.5 : 0);
+        case 'achievements':
+          return g.ach_total ? (g.ach_unlocked ?? 0) / g.ach_total : -1;
         default:
           return 0;
       }
@@ -178,6 +184,9 @@
           <th class="num" aria-sort={ariaSort('badge')}>
             <button onclick={() => sortBy('badge')}>Badge</button>
           </th>
+          <th class="num wide" aria-sort={ariaSort('achievements')}>
+            <button onclick={() => sortBy('achievements')}>Achievements</button>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -195,6 +204,11 @@
             <td class="num">
               {#if g.badge_level}Level {g.badge_level}{/if}
               {#if g.foil_badge}<span class="foil-dot" title="Foil badge"></span>{/if}
+            </td>
+            <td class="num wide">
+              {#if g.ach_total}
+                <span class:perfect={(g.ach_unlocked ?? 0) >= g.ach_total}>{num(g.ach_unlocked ?? 0)} / {num(g.ach_total)}</span>
+              {/if}
             </td>
           </tr>
         {/each}

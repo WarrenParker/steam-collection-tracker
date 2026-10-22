@@ -28,7 +28,9 @@ use crate::db::{self, CatalogCounts, CatalogTarget, LibraryUpdate};
 use crate::paths::AppPaths;
 use crate::session::{self, Session};
 use crate::state::AppState;
-use crate::steam::{inventory, Auth, Bucket, Fetched, Notify, ProfileView, BLOCK_MINUTES};
+use crate::steam::{
+    inventory, parse_achievements, Auth, Bucket, Fetched, Notify, ProfileView, BLOCK_MINUTES,
+};
 
 pub const PRIVATE_PROFILE: &str = "Your Steam profile is private, so the app can't see your games, badges or inventory. In Steam's privacy settings, set My profile, Game details and Inventory to Public.";
 pub const PRIVATE_GAMES: &str = "Your game details are private, so owned games can't be counted. In Steam's privacy settings, set Game details to Public.";
@@ -52,6 +54,8 @@ const SLOW_SECONDS: f64 = 4.2;
 /// for a game that has them, the scan switches to card pages.
 const EMPTY_DEFS_LIMIT: u32 = 5;
 const MAX_POINTS_PAGES: usize = 40;
+/// Games per achievement progress request.
+const ACH_PER_REQUEST: usize = 100;
 /// Games in a row that Steam refused to list before the scan takes a break.
 const LIMITED_IN_A_ROW: u32 = 3;
 const MAX_INVENTORY_PAGES: u32 = 200;
@@ -59,6 +63,7 @@ const MAX_INVENTORY_PAGES: u32 = 200;
 const META_LIBRARY_READ: &str = "library_read_at";
 const META_ELIGIBLE_READ: &str = "eligible_apps_read_at";
 const META_ROUTE: &str = "catalog_route";
+const META_ROUTE_AT: &str = "catalog_route_set_at";
 
 // ---- The overview summary ---------------------------------------------------
 
@@ -339,7 +344,7 @@ fn backlog(state: &AppState) -> (u64, Option<u64>, bool) {
     let slow = route.as_deref() == Some(Route::CARD_PAGES);
     let targets = state
         .db
-        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY))
+        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY, false))
         .unwrap_or_default();
     let remaining = targets.iter().filter(|t| t.wanted(!slow)).count() as u64;
     let per_game = if slow { SLOW_SECONDS } else { FAST_SECONDS };
@@ -587,6 +592,41 @@ async fn read_library(
         db::set_meta(tx, META_LIBRARY_READ, &db::now().to_string())
     })?;
 
+    // Achievement progress for every owned game: a couple of quick requests.
+    ctx.label("Reading your achievements…");
+    let ach_apps = state
+        .db
+        .read(|c| db::apps_needing_achievements(c, db::now()))?;
+    let mut auths: Vec<Auth> = vec![Auth::Key(key)];
+    if let Some(t) = token {
+        auths.push(Auth::Token(t));
+    }
+    let mut auth_index = 0usize;
+    'achievements: for batch in ach_apps.chunks(ACH_PER_REQUEST) {
+        loop {
+            let Some(auth) = auths.get(auth_index).copied() else {
+                break 'achievements;
+            };
+            let f = state
+                .steam
+                .achievements_progress(auth, steam_id, batch, notify)
+                .await?;
+            if f.status == 401 || f.status == 403 {
+                auth_index += 1;
+                continue;
+            }
+            match f.json().as_ref().and_then(parse_achievements) {
+                Some(progress) => {
+                    state
+                        .db
+                        .write(|tx| db::save_achievements(tx, batch, &progress))?;
+                    break;
+                }
+                None => break 'achievements,
+            }
+        }
+    }
+
     let owned: std::collections::HashSet<u64> = games.games.iter().map(|g| g.appid).collect();
     let apps_not_owned = if games.visible {
         item_apps.keys().filter(|a| !owned.contains(a)).count() as u64
@@ -709,7 +749,7 @@ async fn catalog_stages(
         for _ in 0..MAX_POINTS_PAGES {
             let f = state
                 .steam
-                .reward_items(batch, cursor.as_deref(), notify)
+                .reward_items(batch, cursor.as_deref(), true, notify)
                 .await?;
             let Some(page) = f.json().as_ref().and_then(points::parse_page) else {
                 break 'batches;
@@ -729,10 +769,17 @@ async fn catalog_stages(
     }
 
     // Stage 4: each game's item catalog.
-    let mut slow =
-        data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref() == Some(Route::CARD_PAGES);
+    // Card pages are the fallback. A day after falling back, the next scan
+    // tries Steam's item list again, since the reason may have gone away.
+    let route_set_at = data
+        .read(|c| db::get_meta(c, META_ROUTE_AT))?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let mut slow = data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref()
+        == Some(Route::CARD_PAGES)
+        && db::now() - route_set_at < DAY;
     let targets: Vec<CatalogTarget> = data
-        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY))?
+        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY, !slow))?
         .into_iter()
         .filter(|t| t.wanted(!slow))
         .collect();
@@ -761,6 +808,11 @@ async fn catalog_stages(
     for (i, target) in targets.iter().enumerate() {
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
+        }
+        if slow && target.upgrade_only {
+            // Only worth reading through Steam's item list, which isn't working.
+            ctx.progress(i as u64 + 1, None);
+            continue;
         }
         let game_started = Instant::now();
         let has_cards = target.has_cards == Some(true) || target.evidence;
@@ -799,7 +851,10 @@ async fn catalog_stages(
             }
             if empty_defs >= EMPTY_DEFS_LIMIT {
                 slow = true;
-                data.write(|tx| db::set_meta(tx, META_ROUTE, Route::CARD_PAGES))?;
+                data.write(|tx| {
+                    db::set_meta(tx, META_ROUTE, Route::CARD_PAGES)?;
+                    db::set_meta(tx, META_ROUTE_AT, &db::now().to_string())
+                })?;
                 ctx.state.scan.set(ctx.app, |s| s.slow_route = true);
                 let left = targets.len() - i;
                 if !resume && first_catalog && estimate(left, true) > CONFIRM_SECONDS {
@@ -827,6 +882,8 @@ async fn catalog_stages(
             }
             let page = cardpage::parse(&f.body);
             let mut items = cardpage::to_items(&page);
+            let known = data.read(|c| db::owned_card_types(c, target.appid))?;
+            cardpage::apply_known_types(&mut items, &known);
             items.extend(extra.drain(..).filter(|x| x.class != class::CARD));
             found = Some((items, Route::CARD_PAGES));
         }

@@ -1390,6 +1390,15 @@ input:focus {
   text-align: right;
 }
 
+.games .num.wide {
+  width: 128px;
+}
+
+.games .perfect {
+  color: var(--good);
+  font-weight: 600;
+}
+
 .games tbody tr:hover td {
   background: var(--surface);
 }

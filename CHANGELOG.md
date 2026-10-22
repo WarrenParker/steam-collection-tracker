@@ -2,6 +2,23 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.4.0] - 2026-10-22
+
+### Added
+
+- **Achievements.** Scans read your achievement progress for every owned game. The overview shows your average completion (counted the way Steam does, over games you've started), achievements unlocked and perfect games. The Games tab has a sortable Achievements column.
+- **Owned games with items**, shown as "X of Y" on the overview, and a **With items** filter on the Games tab.
+- Points Shop items that can't be bought directly, such as sale rewards and retired items, are now part of the catalog.
+
+### Changed
+
+- Opening the app while it's already running brings the open window forward instead of starting a second copy.
+- If Steam's quick item list isn't available, the app tries it again a day later, and re-reads games it had to catalog the slow way once it works.
+
+### Fixed
+
+- Cards read from a game's card page now use Steam's own item numbers when you own any card from the set, so they match your inventory. Games cataloged this way in 0.3.0 are read again on the next scan.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added
