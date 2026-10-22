@@ -72,8 +72,11 @@
         case 'value':
           return g.value ?? -1;
         case 'cost':
-          // Money first; points-only costs sort after every money cost.
-          return g.cost !== null ? g.cost : g.cost_points > 0 ? 1e12 + g.cost_points : -1;
+          // By money; games that only need points sit just below every game
+          // that needs money, ordered by their points.
+          if (g.cost !== null && g.cost > 0) return 1 + g.cost;
+          if (g.cost_points > 0) return g.cost_points / 1e9;
+          return g.cost !== null ? 0 : -1;
         case 'badge':
           return (g.badge_level ?? -1) + (g.foil_badge ? 0.5 : 0);
         case 'achievements':
@@ -242,10 +245,9 @@
             <td class="num">{g.items ? num(g.items) : ''}</td>
             <td class="num">{g.your_items ? num(g.your_items) : ''}</td>
             <td class="num">{g.value !== null ? money(g.value, g.currency) : ''}</td>
-            <td class="num">
-              {#if g.cost !== null}{g.cost === 0 && g.cost_points === 0 ? 'Done' : money(g.cost, g.currency)}{/if}{#if g.cost_points > 0}<span
-                  class="pts">{g.cost !== null && g.cost > 0 ? ' + ' : ''}{num(g.cost_points)} pts</span
-                >{/if}
+            <td class="num cost-cell">
+              {#if g.cost !== null && g.cost > 0}<span class="money">{money(g.cost, g.currency)}</span>{:else if g.cost === 0 && g.cost_points === 0}Done{/if}
+              {#if g.cost_points > 0}<span class="pts">{g.cost !== null && g.cost > 0 ? '+ ' : ''}{num(g.cost_points)} pts</span>{/if}
             </td>
             <td class="num">
               {#if g.badge_level}Level {g.badge_level}{/if}

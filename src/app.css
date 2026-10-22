@@ -1787,6 +1787,20 @@ input:focus {
   width: auto;
 }
 
+.games th button {
+  white-space: nowrap;
+}
+
+.games .cost-cell {
+  white-space: nowrap;
+}
+
+.games .cost-cell .money,
+.games .cost-cell .pts {
+  display: block;
+}
+
 .games .pts {
   color: var(--text-3);
+  font-size: 12px;
 }
