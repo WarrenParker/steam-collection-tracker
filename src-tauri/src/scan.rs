@@ -543,6 +543,7 @@ async fn read_library(
         )?;
         if outcome.visible {
             db::replace_inventory(tx, tally.rows.values())?;
+            db::refresh_mismatched_catalogs(tx)?;
         }
         if badges.visible {
             db::replace_badges(tx, &badges.list)?;

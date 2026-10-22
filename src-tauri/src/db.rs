@@ -650,6 +650,21 @@ pub fn save_achievements(
     Ok(())
 }
 
+/// Games where the user owns a card the catalog doesn't have under that
+/// number are read again on this scan, so the catalog picks up the real number.
+pub fn refresh_mismatched_catalogs(c: &Connection) -> rusqlite::Result<usize> {
+    c.execute(
+        "UPDATE apps SET catalog_checked_at = NULL
+         WHERE catalog_checked_at IS NOT NULL AND appid IN (
+             SELECT v.appid FROM inventory v
+             WHERE v.class = 2 AND v.item_type IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM items i
+                 WHERE i.appid = v.appid AND i.class = 2
+                   AND i.item_type = v.item_type AND i.foil = v.foil))",
+        (),
+    )
+}
+
 /// Names and Steam item numbers of the cards the user owns for a game.
 pub fn owned_card_types(c: &Connection, appid: u64) -> rusqlite::Result<Vec<(String, i64)>> {
     let mut st = c.prepare(

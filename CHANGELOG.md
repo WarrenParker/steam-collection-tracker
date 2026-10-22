@@ -6,7 +6,7 @@ All notable changes to Steam Collection Tracker are listed here, newest first. T
 
 ### Fixed
 
-- Cards you own keep their exact Steam item numbers even in sets whose numbers have gaps, so every owned card lines up with the catalog. A scan on 0.4.1 matched 22 of 23 owned cards; the one miss was in a set like that.
+- Cards you own keep their exact Steam item numbers even in sets whose numbers have gaps, so every owned card lines up with the catalog. A scan on 0.4.1 matched 22 of 23 owned cards; the one miss was in a set like that. From now on, any game where you own a card the catalog doesn't match is read again on the next scan.
 
 ## [0.4.1] - 2026-10-22
 
