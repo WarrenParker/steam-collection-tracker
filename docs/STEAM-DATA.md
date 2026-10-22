@@ -34,6 +34,7 @@ What the app reads from Steam, where it comes from, and what each connection tes
 - The app spaces requests out: 0.3 s for the Web API, 3.5 s for Community pages, 4 s for the inventory and Market, and 1 s for the store.
 - After a 429 from anything except the Web API, the app doesn't send that kind of request again for 30 minutes, tracked separately for signed-in and anonymous requests. The Web API is retried after 5 and 15 seconds.
 - Version 0.1.0 retried refused Community requests, which made a test take nearly 3 minutes. Version 0.2.0 fixed that.
+- **Market, Oct 22, 2026.** A long price read was refused (429) after a steady 15 Market requests a minute: 885 in the last hour and 1,520 over two hours, all paced 4 seconds apart. Steam doesn't publish the limit. From 0.6.2, long reads are held to about 480 an hour.
 
 ## Formats worth knowing
 

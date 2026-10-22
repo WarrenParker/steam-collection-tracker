@@ -137,6 +137,7 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 
 - Community, inventory, Store and Market requests identify as the browser built into the app (the interface reports WebView2's own identity at startup) and send browser headers. Steam turns the Market away otherwise.
 - When Steam refuses a request (HTTP 429), the client stops sending that kind for 30 minutes instead of retrying. Only Web API calls are retried. The details are in [STEAM-DATA.md](STEAM-DATA.md).
+- **Market budget.** On top of the 4-second gap, Market requests draw from a budget (`steam/budget.rs`): a burst of 60 goes out at the normal pace, then about one every 7.5 seconds (480 an hour). A refusal makes the pace half again as slow, up to one every 30 seconds, and the slower pace is saved in the database's `meta` table for later runs.
 - **Sign-in** opens Steam's own sign-in page in a second window, which shares the WebView2 profile. When the `steamLoginSecure` cookie appears, the app reads it through Tauri's cookie API and closes the window.
 - **Renewal.** When the cookie is about to expire, the app loads a Steam page in a hidden window, and Steam renews the session itself.
 - **Sign-out** loads Steam in a hidden window and posts to `/login/logout/`, so Steam revokes the session on its side too.
