@@ -87,6 +87,9 @@ impl Default for PriceRules {
 
 /// An order book older than this isn't used for the cost of several copies.
 const BOOK_FRESH_DAYS: i64 = 7;
+/// A listing more than this many times the item's usual sale price is taken
+/// to be an outlier, and the usual price is used instead.
+const OUTLIER_TIMES: i64 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -194,6 +197,9 @@ pub struct ItemView {
     pub cost: Option<i64>,
     /// True when that cost guesses at the price of later copies.
     pub cost_estimated: bool,
+    /// True when some copies are listed far above the usual price, so the
+    /// cost counts them at the usual price instead.
+    pub cost_capped: bool,
     /// Points needed, for items only the Points Shop sells.
     pub cost_points: Option<i64>,
     /// What the Points Shop would charge instead, for items sold both ways.
@@ -250,6 +256,8 @@ pub struct PriceTotals {
     pub cost_items: u64,
     /// Items whose cost guesses at the price of later copies.
     pub cost_estimated: u64,
+    /// Items listed far above their usual price, counted at the usual price.
+    pub cost_capped: u64,
     /// Points for items only the Points Shop sells.
     pub cost_points: i64,
     pub cost_points_items: u64,
@@ -290,6 +298,9 @@ impl PriceTotals {
             if item.cost_estimated {
                 self.cost_estimated += 1;
             }
+            if item.cost_capped {
+                self.cost_capped += 1;
+            }
             if let Some(p) = item.alt_points {
                 self.alt_points += p;
                 self.alt_money += c;
@@ -326,6 +337,7 @@ impl PriceTotals {
             self.cost += o.cost;
             self.cost_items += o.cost_items;
             self.cost_estimated += o.cost_estimated;
+            self.cost_capped += o.cost_capped;
             self.cost_points += o.cost_points;
             self.cost_points_items += o.cost_points_items;
             self.alt_points += o.alt_points;
@@ -1260,8 +1272,14 @@ fn view(e: &Entry, app: App, ctx: &ViewCtx<'_>) -> ItemView {
 
     // What the copies the user can sell are worth: today's cheapest listing,
     // or the average when nobody is selling.
+    // A listing far above what the item sells for counts at its usual price.
     let sellable = e.marketable_copies;
-    let unit = price.as_ref().and_then(|p| p.lowest.or(p.average));
+    let unit = price
+        .as_ref()
+        .and_then(|p| match (p.lowest, usual_price(p)) {
+            (Some(l), Some(u)) => Some(capped(l, u).0),
+            (l, u) => l.or(u),
+        });
     let value = unit.filter(|_| sellable > 0).map(|u| u * sellable as i64);
 
     // What's still needed: in money when the Market sells it, otherwise in
@@ -1270,6 +1288,7 @@ fn view(e: &Entry, app: App, ctx: &ViewCtx<'_>) -> ItemView {
     let points_ok = points_buyable(e, ctx.now);
     let mut cost = None;
     let mut cost_estimated = false;
+    let mut cost_capped = false;
     let mut cost_points = None;
     let mut alt_points = None;
     let mut unpriced = false;
@@ -1278,9 +1297,10 @@ fn view(e: &Entry, app: App, ctx: &ViewCtx<'_>) -> ItemView {
             (Some(r), Some(p)) if marketable => money_for(r, p, copies, ctx),
             _ => None,
         };
-        if let Some((m, exact)) = money {
-            cost = Some(m);
-            cost_estimated = !exact;
+        if let Some(found) = money {
+            cost = Some(found.cost);
+            cost_estimated = !found.exact;
+            cost_capped = found.capped;
             if points_ok {
                 alt_points = e.points_cost.map(|c| c * copies);
             }
@@ -1323,6 +1343,7 @@ fn view(e: &Entry, app: App, ctx: &ViewCtx<'_>) -> ItemView {
         value,
         cost,
         cost_estimated,
+        cost_capped,
         cost_points,
         alt_points,
         unpriced,
@@ -1412,27 +1433,75 @@ fn trend(p: &ItemPrice, rules: PriceRules) -> Option<&'static str> {
     }
 }
 
+/// What an item usually sells for: its 90-day average sale price, or its
+/// 1-year average when nothing sold in 90 days.
+fn usual_price(p: &ItemPrice) -> Option<i64> {
+    p.avg_90.or(p.avg_365).filter(|u| *u > 0)
+}
+
+/// A price, or the usual price when it's more than `OUTLIER_TIMES` the usual
+/// price. The flag says whether it was replaced.
+fn capped(price: i64, usual: i64) -> (i64, bool) {
+    if price > OUTLIER_TIMES * usual {
+        (usual, true)
+    } else {
+        (price, false)
+    }
+}
+
+struct Money {
+    cost: i64,
+    /// False when later copies were priced at the cheapest listing because
+    /// no fresh order book was read.
+    exact: bool,
+    /// Some copies were listed far above the usual price and counted at it.
+    capped: bool,
+}
+
 /// The cost of `copies` copies from the Market, cheapest first. A fresh order
 /// book prices each copy; without one, every copy is priced at today's
-/// cheapest listing and the cost is marked as estimated.
-fn money_for(r: &MarketRow, p: &ItemPrice, copies: i64, ctx: &ViewCtx<'_>) -> Option<(i64, bool)> {
+/// cheapest listing and the cost is marked as estimated. Copies listed at
+/// more than three times the usual price count at the usual price.
+fn money_for(r: &MarketRow, p: &ItemPrice, copies: i64, ctx: &ViewCtx<'_>) -> Option<Money> {
     let lowest = p.lowest?;
+    let usual = usual_price(p);
+    let cap = |price: i64| usual.map_or((price, false), |u| capped(price, u));
+    let copies = copies.max(0);
     if copies <= 1 {
-        return Some((lowest * copies.max(0), true));
+        let (unit, was_capped) = cap(lowest);
+        return Some(Money {
+            cost: unit * copies,
+            exact: true,
+            capped: was_capped && copies > 0,
+        });
     }
     if let (Some(at), Some(text)) = (r.book_at, r.book.as_deref()) {
         if ctx.now - at <= BOOK_FRESH_DAYS * DAY {
             let from = r.book_currency.unwrap_or(r.currency);
+            let mut any_capped = false;
             let levels: Vec<(i64, i64)> = book::from_text(text)
                 .into_iter()
-                .filter_map(|(price, qty)| Some((ctx.fx.convert(price, from)?, qty)))
+                .filter_map(|(price, qty)| {
+                    let (unit, c) = cap(ctx.fx.convert(price, from)?);
+                    any_capped |= c;
+                    Some((unit, qty))
+                })
                 .collect();
-            if let Some(found) = book::cost(&levels, copies) {
-                return Some(found);
+            if let Some((cost, exact)) = book::cost(&levels, copies) {
+                return Some(Money {
+                    cost,
+                    exact,
+                    capped: any_capped,
+                });
             }
         }
     }
-    Some((lowest * copies, false))
+    let (unit, was_capped) = cap(lowest);
+    Some(Money {
+        cost: unit * copies,
+        exact: false,
+        capped: was_capped,
+    })
 }
 
 /// Ties Market items to catalog items: by the Market name of a copy the user
@@ -1937,6 +2006,43 @@ mod tests {
         assert_eq!(snap.account.prices.cost, 550);
         assert_eq!(snap.account.currency, "USD");
         assert_eq!(snap.account.prices_at, Some(50));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outlier_listings_count_at_the_usual_price() {
+        let (db, dir) = setup("outliers");
+        db.write(|tx| {
+            tx.execute_batch(
+                "UPDATE apps SET market_checked_at = 50 WHERE appid = 10;
+                 INSERT INTO market (hash_name, appid, class, foil, name, currency, lowest, listings, seen_at,
+                                     avg_90, book_at, book) VALUES
+                     ('10-Alpha (Foil)', 10, 2, 1, 'Alpha (Foil)', 1, 5000, 1, 60, 400, NULL, NULL),
+                     ('10-Beta', 10, 2, 0, 'Beta', 1, 200, 4, 60, 200, 95, '200:1 2000:3'),
+                     ('10-Sky (Profile Background)', 10, 3, 0, 'Sky (Profile Background)', 1, 500, 2, 60, 200, NULL, NULL);",
+            )
+        })
+        .unwrap();
+        let snap = db.read(|c| compute(c, rules(false, false), 100)).unwrap();
+        let items = snap.game_items(10);
+        let find = |name: &str, foil: bool| {
+            items
+                .iter()
+                .find(|i| i.name == name && i.foil == foil)
+                .unwrap()
+                .clone()
+        };
+        let alpha_foil = find("Alpha", true);
+        assert_eq!(alpha_foil.cost, Some(400), "$5 listing, usual 40 cents");
+        assert!(alpha_foil.cost_capped && !alpha_foil.cost_estimated);
+        // Two copies: 200, then a 2000 listing counted at the usual 200.
+        let beta = find("Beta", false);
+        assert_eq!((beta.cost, beta.cost_capped), (Some(400), true));
+        // Within three times the usual price: kept as listed.
+        let sky = find("Sky", false);
+        assert_eq!((sky.cost, sky.cost_capped), (Some(500), false));
+        assert_eq!(snap.games[&10].prices.cost_capped, 2);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -395,6 +395,13 @@
                 instead of {money(prices.alt_money, cur)}.
               </p>
             {/if}
+            {#if prices.cost_capped > 0}
+              <p class="section-note small-note">
+                {num(prices.cost_capped)} {prices.cost_capped === 1 ? 'item is' : 'items are'} listed at more than three
+                times {prices.cost_capped === 1 ? 'its' : 'their'} usual price, so {prices.cost_capped === 1 ? "it's" : "they're"}
+                counted at the 90-day average sale price.
+              </p>
+            {/if}
             {#if prices.cost_estimated > 0}
               <p class="section-note small-note">
                 {num(prices.cost_estimated)} {prices.cost_estimated === 1 ? 'card is' : 'cards are'} estimated at today's

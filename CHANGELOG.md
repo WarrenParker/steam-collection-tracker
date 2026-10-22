@@ -2,6 +2,17 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.6.1] - 2026-10-22
+
+### Changed
+
+- An item listed at more than three times its usual price counts at its 90-day average sale price in cost to complete and account value, marked as estimated. One background listed at $876 that sells for about $2 made up most of a whole account's cost to complete. Items that haven't sold in 90 days use their 1-year average, and the rule applies once an item's price history has been read.
+
+### Fixed
+
+- Items that share a name, like two backgrounds both called "Space Elevator", match the right Market item by number. One was listed twice before.
+- After prices are read, the overview offers **Continue scan** to start reading price history, instead of Scan again.
+
 ## [0.6.0] - 2026-10-22
 
 ### Added

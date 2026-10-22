@@ -174,6 +174,7 @@ export interface ItemView {
   value: number | null;
   cost: number | null;
   cost_estimated: boolean;
+  cost_capped: boolean;
   cost_points: number | null;
   alt_points: number | null;
   unpriced: boolean;
@@ -210,6 +211,7 @@ export interface PriceTotals {
   cost: number;
   cost_items: number;
   cost_estimated: number;
+  cost_capped: number;
   cost_points: number;
   cost_points_items: number;
   alt_points: number;
