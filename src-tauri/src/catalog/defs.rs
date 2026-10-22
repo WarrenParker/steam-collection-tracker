@@ -94,12 +94,15 @@ mod tests {
         let items = parse(&v).unwrap();
         assert_eq!(items.len(), 6);
         assert_eq!(card_count(&items), 2);
-        assert_eq!(items[0].image.as_deref(), Some("c.png"));
+        let img = |f: &str| {
+            format!("https://cdn.akamai.steamstatic.com/steamcommunity/public/images/items/440/{f}")
+        };
+        assert_eq!(items[0].image, Some(img("c.png")));
         assert!(items[1].foil);
-        assert_eq!(items[1].image.as_deref(), Some("d.png"));
+        assert_eq!(items[1].image, Some(img("d.png")));
         assert_eq!(
-            items[3].image.as_deref(),
-            Some("e.png"),
+            items[3].image,
+            Some(img("e.png")),
             "foil falls back to the normal art"
         );
         assert_eq!(items[4].name.as_deref(), Some("tf2pyro"));
