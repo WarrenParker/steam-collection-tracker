@@ -2,6 +2,26 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.6.0] - 2026-10-22
+
+### Added
+
+- **Prices.** Scans read every item's cheapest listing from the Steam Community Market, game by game, and again when prices are more than a day old.
+- **Account value:** what the items you could sell are worth at today's prices, before Steam's fees. Items you can't sell, such as Points Shop purchases, are shown separately as a points value.
+- **Cost to complete,** for every game and the whole account. Market items are counted in money, buying the cheapest copies first, so a card that needs several copies is priced up the listings. Items only the Points Shop sells are counted in points. Items sold both ways count in money, with a line showing what they'd cost in points instead.
+- **Price history.** Each item's history is read once, then refreshed about once a month, a few items a day. The app keeps the last year in a compact form and works out the average over 30 days, 90 days, a year and all time, and the lowest and highest prices ever. Click an item's price in a game's details for its figures and a chart, and "Show full history" for every sale since the first.
+- **Price spike and Price dip tags,** when today's cheapest listing is far from the average. Settings choose how far (25% by default) and by how much at least (5 cents by default).
+- **Currency setting.** Prices can be shown in any currency Steam uses, converted with daily exchange rates.
+- Settings: **Average price over** 30 days, 90 days, a year or all time.
+- Value and To complete columns in the Games tab.
+- The connection test checks the order book and both price history routes, and how much each one downloads.
+
+### Changed
+
+- Whether an item can be sold now comes from the Market itself, replacing the rule of thumb behind the Points and Not marketable tags.
+- Emoticons and backgrounds Steam no longer hands out but that are for sale on the Market join their game's list and count toward completion. They're tagged Unobtainable again if nobody is selling them.
+- The first price history read takes a few hours for a large collection, so the scan asks before starting it, with a time estimate. It can be paused anytime.
+
 ## [0.5.1] - 2026-10-22
 
 ### Fixed
