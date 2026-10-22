@@ -16,6 +16,9 @@ Ideas that aren't scheduled yet, and requests that have shipped. When an idea is
 
 | Request | Version |
 |---|---|
+| ✅ **Owned games with items**, shown as "X of Y", and a With items filter. | [0.4.0](../CHANGELOG.md#040---2026-10-22) |
+| ✅ **Average achievement completion**, achievements unlocked and perfect games, plus an Achievements column. | [0.4.0](../CHANGELOG.md#040---2026-10-22) |
+| ✅ **One copy of the app at a time.** Opening it again brings the open window forward. | [0.4.0](../CHANGELOG.md#040---2026-10-22) |
 | ✅ **Every game listed**, including games you don't own (tagged Unowned) and Steam sale events (tagged Event). | [0.3.0](../CHANGELOG.md#030---2026-10-22) |
 | ✅ **Steam Family games** behind a setting, tagged Family. | [0.3.0](../CHANGELOG.md#030---2026-10-22) |
 | ✅ **Scan speed and a time estimate.** The scan uses Steam's fastest source, shows time left, and asks first before a long first scan. | [0.3.0](../CHANGELOG.md#030---2026-10-22) |

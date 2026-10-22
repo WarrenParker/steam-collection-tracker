@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.4.1. Phase 1 is done; Phase 2 is next.
+**Now:** version 0.4.2. Phase 1 is done; Phase 2 is next.
 
 ## Goal
 
@@ -32,9 +32,10 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 
 ## Phase 2: Completion and tags
 
-- ⬜ Completion per game and for the whole account. By default a badge counts as owning its cards; a setting can require the cards too.
+- ⬜ Completion per game and for the whole account. A badge counts as owning its cards (a setting can require the cards too), and a game's cards are complete at badge level 5 plus the foil badge.
+- ⬜ Steam Family games count toward the account-wide figure when the Steam Family setting is on.
 - ⬜ Tags: Unowned, Family shared, Points (no market price), Unobtainable, Limited/Event, Not marketable, Unverified, Price spike, Price dip.
-- ⬜ Availability detection, with manual tag override.
+- ⬜ Availability detection, with manual tag override. Unobtainable items are tagged but left out of the percentage, and old items Steam no longer lists appear only if you own them.
 
 ## Phase 3: Prices
 
