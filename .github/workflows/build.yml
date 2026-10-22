@@ -1,12 +1,11 @@
 name: Build
 
-# Every push to main builds and tests the Windows app.
-# Pushing a version tag (v0.1.0, v0.2.0, ...) also publishes a release,
+# Every push to main builds and tests the Windows app. When the version in
+# src-tauri/Cargo.toml has no release yet, the build also publishes one,
 # which is what the app's updater downloads.
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -61,6 +60,28 @@ jobs:
           "Built SteamCollectionTracker.exe ($size MB), sha256 $hash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "Built SteamCollectionTracker.exe ($size MB)" | Out-File -FilePath build.log -Append
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SteamCollectionTracker
+          path: out/
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $tag = "v$version"
+          gh release view $tag 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            "Release $tag already exists, so nothing was published." | Out-File -FilePath build.log -Append
+            exit 0
+          }
+          gh release create $tag out/SteamCollectionTracker.exe out/SteamCollectionTracker.exe.sha256 --target $env:GITHUB_SHA --title "Steam Collection Tracker $tag" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Published release $tag" | Out-File -FilePath build.log -Append
+
       # Post a short build report as an annotation, which can be read through
       # GitHub's API: test results, warnings and size on success, the tail of
       # the log on failure.
@@ -71,22 +92,9 @@ jobs:
           encode() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
           touch build.log
           if [ "${{ job.status }}" = "success" ]; then
-            body=$( { grep -E "test result|Built SteamCollectionTracker" build.log; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40; } | encode)
+            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists" build.log; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40; } | encode)
             echo "::notice title=Build report::${body}"
           else
             body=$(grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log | tail -n 150 | encode)
             echo "::error title=Build failed::${body}"
           fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SteamCollectionTracker
-          path: out/
-
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create $env:GITHUB_REF_NAME out/SteamCollectionTracker.exe out/SteamCollectionTracker.exe.sha256 --title "Steam Collection Tracker $env:GITHUB_REF_NAME" --notes-file release-notes.md

@@ -32,4 +32,4 @@ npm run tauri dev      # run in development
 npm run tauri build    # build src-tauri/target/release/steam-collection-tracker.exe
 ```
 
-Releases are built by GitHub Actions (`.github/workflows/build.yml`) when a `v*` tag is pushed.
+GitHub Actions (`.github/workflows/build.yml`) builds every push to `main` and publishes a release whenever the version in `src-tauri/Cargo.toml` is new.
