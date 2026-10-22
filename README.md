@@ -16,16 +16,18 @@
 
 Steam Collection Tracker is a small Windows app for people who collect Steam items. It reads your profile and works out how complete your collection is for every game: trading cards, foil cards, emoticons, profile backgrounds, badges and Points Shop items.
 
-The app is in early development. Right now it reads your profile, games, badges and inventory. Completion percentages, full item lists and prices are next; see the [roadmap](docs/ROADMAP.md).
+The app is in early development. It reads your profile, games, badges and inventory, and builds a catalog of every item your games have. Completion percentages and prices are next; see the [roadmap](docs/ROADMAP.md).
 
 ## Features
 
 - One portable exe. Nothing to install, and it updates itself.
-- Reads your games, badges and inventory, including items for games you don't own.
+- Lists every game you own or have items for, and optionally your Steam Family's shared games.
+- Catalogs every item those games have: cards, foil cards, emoticons, backgrounds, booster packs and Points Shop items.
+- Scans in the background, and can pause and pick up where it left off.
 - Optional sign-in through Steam's own page, so the app can read your inventory and Points Shop items.
 - Greyscale, dark and light themes.
 
-Planned: per-game and account-wide completion, a full catalog of every item, account value, cost to complete, price history, and a shareable progress banner.
+Planned: per-game and account-wide completion, account value, cost to complete, price history, and a shareable progress banner.
 
 ## Download
 

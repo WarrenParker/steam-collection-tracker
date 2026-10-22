@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.2.0. Phase 0 is done; Phase 1 is next.
+**Now:** version 0.3.0. Phase 1 is built and waiting on a real-world test.
 
 ## Goal
 
@@ -16,16 +16,18 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - [x] Updates button, version history and switching, and automatic tidy-up. [0.2.0](../CHANGELOG.md#020---2026-10-21)
 - [x] Confirm the signed-in sources with a 0.2.0 connection test. Inventory, Points Shop items and the Steam Family library all work. The market still refused, which carries over to Phase 1. Results are in [STEAM-DATA.md](STEAM-DATA.md).
 
-## Phase 1: Scanner and local database (next)
+## Phase 1: Scanner and local database (testing)
 
-- [ ] Find a working route to the market. Re-test once the block left by 0.1.0 has expired. If Steam keeps refusing, find other sources for each game's emoticons, backgrounds and prices.
-- [ ] Full item catalog for every game:
-  - cards and foil cards, from each game's card page
-  - emoticons, backgrounds and boosters, from the market, signed in
+- [ ] Re-test the market once the block left by 0.1.0 has expired. The catalog no longer depends on it; prices in Phase 3 do.
+- [x] Full item catalog for every game. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+  - cards and foil cards, from Steam's item definitions, with each game's card page as the fallback
+  - emoticons and backgrounds, from the item definitions and the Points Shop
+  - booster packs, one per game with cards
   - Points Shop items, from the public catalog
-- [ ] A local SQLite database in the data folder.
-- [ ] Resumable, rate-safe background scanning, with incremental rescans and a time estimate before the first scan.
-- [ ] Every game listed: owned, unowned (tagged) and family-shared (behind a setting).
+- [x] A local SQLite database in the data folder. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- [x] Resumable, rate-safe background scanning, with incremental rescans and a time estimate before a long first scan. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- [x] Every game listed: owned, unowned (tagged) and family-shared (behind a setting). [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- [ ] Confirm the new sources with a 0.3.0 connection test and a full scan of a real account.
 
 ## Phase 2: Completion and tags
 
@@ -66,5 +68,6 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - **Portable.** A `data` folder next to the exe holds settings, cache and reports. Every setting is changed inside the app.
 - **Updates from GitHub Releases.** Versions follow semantic versioning, and each release's notes come from the changelog. Any version can be installed from the app.
 - **Each person uses their own API key.** It's encrypted for their Windows account and never bundled in the exe.
+- **The catalog doesn't need the market.** Steam's item definitions and the Points Shop describe every item, so the market is only needed for prices.
 - **Sign-in is recommended.** Steam refuses inventory and market requests from apps that aren't signed in. Sign-in happens on Steam's own page, and the app never handles the password.
 - **Plain language everywhere.** Every message says what happened and what to do next.

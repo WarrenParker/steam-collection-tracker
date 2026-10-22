@@ -1,6 +1,22 @@
 # Changelog
 
-Every change to Steam Collection Tracker, newest first. Version numbers follow [semantic versioning](https://semver.org) (MAJOR.MINOR.PATCH): PATCH for fixes, MINOR for new features, MAJOR for big changes. Versions starting with 0 are early development.
+All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
+
+## [0.3.0] - 2026-10-22
+
+### Added
+
+- **Item catalog.** Scans now read every item that exists for your games: cards, foil cards, emoticons, backgrounds, booster packs and Points Shop items. The app uses Steam's item list when your connection allows it, and each game's card page otherwise.
+- **Games tab** listing every game you own or have items for, with search, filters and sorting. Games you don't own are tagged Unowned, and Steam sale events are tagged Event.
+- **Steam Family games**, in Settings. When it's on, games your family shares with you are listed and cataloged too, tagged Family.
+- **Background scanning** with progress and a time estimate. You can pause a scan and continue it later, even after closing the app. If Steam asks the app to slow down, the scan takes a 30-minute break and then carries on by itself.
+- **Collection database.** Everything a scan reads is saved in `collection.db` in the data folder, so later scans only fetch what's new or out of date.
+- The overview shows the item catalog by type and how many games are owned, unowned and shared.
+- The connection test checks the new sources: Steam's item list, which games have trading cards, the Points Shop for several games at once, and your emoticons. The market check now runs first among the per-game checks.
+
+### Changed
+
+- The last scan is kept in the database. The old `cache` folder is removed.
 
 ## [0.2.0] - 2026-10-21
 

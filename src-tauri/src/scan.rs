@@ -52,6 +52,8 @@ const SLOW_SECONDS: f64 = 4.2;
 /// for a game that has them, the scan switches to card pages.
 const EMPTY_DEFS_LIMIT: u32 = 5;
 const MAX_POINTS_PAGES: usize = 40;
+/// Games in a row that Steam refused to list before the scan takes a break.
+const LIMITED_IN_A_ROW: u32 = 3;
 const MAX_INVENTORY_PAGES: u32 = 200;
 
 const META_LIBRARY_READ: &str = "library_read_at";
@@ -752,6 +754,7 @@ async fn catalog_stages(
     }
     let mut auth_index = 0usize;
     let mut empty_defs = 0u32;
+    let mut limited = 0u32;
     let mut timed = 0u32;
     let mut timed_secs = 0f64;
 
@@ -767,6 +770,7 @@ async fn catalog_stages(
         if !slow {
             match read_defs(state, target.appid, &auths, &mut auth_index, notify).await? {
                 DefsResult::Items(items) => {
+                    limited = 0;
                     if defs::card_count(&items) > 0 || !has_cards {
                         empty_defs = 0;
                         found = Some((items, "defs"));
@@ -775,6 +779,14 @@ async fn catalog_stages(
                         empty_defs += 1;
                         extra = items;
                     }
+                }
+                DefsResult::Limited => {
+                    limited += 1;
+                    if limited >= LIMITED_IN_A_ROW {
+                        return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
+                    }
+                    ctx.progress(i as u64 + 1, None);
+                    continue;
                 }
                 DefsResult::Skip(error) => {
                     data.write(|tx| db::save_catalog_error(tx, target.appid, &error))?;
@@ -841,6 +853,8 @@ async fn catalog_stages(
 
 enum DefsResult {
     Items(Vec<CatalogItem>),
+    /// Steam asked the app to slow down, even after the client's own waits.
+    Limited,
     /// This game's answer was unusable; the next game may be fine.
     Skip(String),
     /// The item definitions can't be read on this connection at all.
@@ -866,10 +880,7 @@ async fn read_defs(
             continue;
         }
         if f.status == 429 {
-            return Ok(DefsResult::Skip(
-                "Steam asked the app to slow down. This game is read again on the next scan."
-                    .to_string(),
-            ));
+            return Ok(DefsResult::Limited);
         }
         if f.status >= 500 {
             return Ok(DefsResult::Skip(format!(
