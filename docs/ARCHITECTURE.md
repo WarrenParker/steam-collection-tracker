@@ -7,7 +7,7 @@ A guide to the code, the data folder, and how versions get built and released.
 - **Engine:** Rust, in `src-tauri/`. Talks to Steam, keeps settings and the collection database, runs scans and tests, and updates the app.
 - **Database:** SQLite, through [rusqlite](https://github.com/rusqlite/rusqlite) with SQLite compiled into the exe.
 - **Interface:** Svelte 5 and TypeScript, in `src/`. Built with Vite into static files that are embedded in the exe.
-- **Shell:** [Tauri 2](https://tauri.app). It opens a native window and draws the interface with WebView2, the Edge engine built into Windows 10 and 11. The result is one exe of about 7 MB.
+- **Shell:** [Tauri 2](https://tauri.app). It opens a native window and draws the interface with WebView2, the Edge engine built into Windows 10 and 11. The result is one exe of about 9 MB.
 
 ## Repository layout
 
@@ -83,12 +83,12 @@ The schema version is kept in SQLite's `user_version`. A database the app can't 
 
 A scan runs in the background in four stages. Progress is saved as it goes, so a scan can be paused, or the app closed, and continued later.
 
-1. **Library:** profile, owned games, badges, inventory and, when signed in, the Steam Family library, emoticons and profile items.
+1. **Library:** profile, owned games, badges, inventory, achievement progress and, when signed in, the Steam Family library and profile items.
 2. **Store check:** which games have trading cards (the store's category 29) and names for games the user doesn't own. 100 games per request.
 3. **Points Shop:** every item each game sells for points, 20 games per request, plus the list of apps that are Steam sale events.
-4. **Item catalog:** each card game's full item list, from Steam's item definitions (`IQuestService/GetCommunityItemDefinitions`) when available. If those aren't available, or leave out a game's cards, the scan reads the game's card page instead and remembers to keep doing so. Every game with cards also gets its booster pack.
+4. **Item catalog:** each card game's card set, from its card page. The page numbers cards by their place in the set, so the app takes Steam's real item numbers from any card the user owns. Emoticons and backgrounds come from the Points Shop stage, and every game with cards also gets its booster pack.
 
-Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30. A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page requests, the scan stops, waits 30 minutes, and carries on by itself while the app is open.
+Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30. A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page requests, the scan stops, waits 30 minutes, and carries on by itself while the app is open. Only one copy of the app runs at a time; opening it again brings the existing window forward.
 
 ## Talking to Steam
 
@@ -102,6 +102,7 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
   | Market | 4 s |
   | Store | 1 s |
 
+- Community, inventory, Store and Market requests identify as the browser built into the app (the interface reports WebView2's own identity at startup) and send browser headers. Steam turns the Market away otherwise.
 - When Steam refuses a request (HTTP 429), the client stops sending that kind for 30 minutes instead of retrying. Only Web API calls are retried. The details are in [STEAM-DATA.md](STEAM-DATA.md).
 - **Sign-in** opens Steam's own sign-in page in a second window, which shares the WebView2 profile. When the `steamLoginSecure` cookie appears, the app reads it through Tauri's cookie API and closes the window.
 - **Renewal.** When the cookie is about to expire, the app loads a Steam page in a hidden window, and Steam renews the session itself.
