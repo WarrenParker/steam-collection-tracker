@@ -1,23 +1,36 @@
+```text
+  ╔═══╗   ╔═══╗   ╔═══╗   ╔═══╗
+  ║ 0 ╟───╢ 1 ╟───╢ 2 ╟───╢ 3 ║      STEAM COLLECTION TRACKER
+  ╚═══╝   ╚═══╝   ╚═══╝   ╚═╤═╝
+                            │       Roadmap
+  ╔═════╗ ╔═══╗   ╔═══╗   ╔═╧═╗
+  ║ 1.0 ╟─╢ 6 ╟───╢ 5 ╟───╢ 4 ║
+  ╚═════╝ ╚═══╝   ╚═══╝   ╚═══╝
+```
+
 # Roadmap
 
-The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't planned yet live on the [idea board](IDEAS.md).
+The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't planned yet live on the [idea board](IDEAS.md). There's also a [styled version of this roadmap](https://claude.ai/artifact/QfRF2gnweMCMUFVmAAKgpf) that matches the app.
 
-**Now:** version 0.2.0. Phase 0 is wrapping up; Phase 1 is next.
+Each phase is worked on in its own chat in the Steam Collection Tracker project.
+
+**Now:** version 0.2.0. Phase 0 is done; Phase 1 is next.
 
 ## Goal
 
 A lightweight Windows app, one exe in one folder with nothing to install, that loads your own Steam profile and shows how complete your collection is for every game. That covers cards, foil cards, emoticons, backgrounds, badges, Points Shop items and anything else tied to a game. It also shows account value, cost to complete, and price insight.
 
-## Phase 0: Setup and proof
+## Phase 0: Setup and proof (done)
 
 - [x] Windows build pipeline on GitHub, published releases and a self-updater. [0.1.0](../CHANGELOG.md#010---2026-10-21)
 - [x] First-time setup, overview counts and a connection test that runs on the user's PC. [0.1.0](../CHANGELOG.md#010---2026-10-21)
 - [x] Steam sign-in, moved up from a later phase. The first connection test showed that Steam refuses anonymous inventory and market requests. [0.2.0](../CHANGELOG.md#020---2026-10-21)
 - [x] Updates button, version history and switching, and automatic tidy-up. [0.2.0](../CHANGELOG.md#020---2026-10-21)
-- [ ] Confirm the signed-in inventory, market, price history, Points Shop and Steam Family sources with a 0.2.0 connection test, and record the results in [STEAM-DATA.md](STEAM-DATA.md).
+- [x] Confirm the signed-in sources with a 0.2.0 connection test. Inventory, Points Shop items and the Steam Family library all work. The market still refused, which carries over to Phase 1. Results are in [STEAM-DATA.md](STEAM-DATA.md).
 
-## Phase 1: Scanner and local database
+## Phase 1: Scanner and local database (next)
 
+- [ ] Find a working route to the market. Re-test once the block left by 0.1.0 has expired. If Steam keeps refusing, find other sources for each game's emoticons, backgrounds and prices.
 - [ ] Full item catalog for every game:
   - cards and foil cards, from each game's card page
   - emoticons, backgrounds and boosters, from the market, signed in

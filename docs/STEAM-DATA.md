@@ -7,18 +7,18 @@ What the app reads from Steam, where it comes from, and what each connection tes
 | Data | Where it comes from | Needs | What tests showed |
 |---|---|---|---|
 | Profile | `ISteamUser/GetPlayerSummaries/v2` | API key | Works. `communityvisibilitystate` 3 means public. (0.1.0) |
-| Owned games | `IPlayerService/GetOwnedGames/v1` | API key; Game details public | Works: 177 games. A private library answers with an empty `response`. (0.1.0) |
+| Owned games | `IPlayerService/GetOwnedGames/v1` | API key; Game details public | Works. A private library answers with an empty `response`. (0.1.0) |
 | Badges and level | `IPlayerService/GetBadges/v1` | API key | Works. Game badges have an `appid`; foil badges have `border_color: 1`. (0.1.0) |
 | Card set and owned cards | `steamcommunity.com/profiles/{id}/gamecards/{appid}` (HTML) | Nothing | Works without sign-in. Cards are `class="badge_card_set_card …"`; owned quantities are in `badge_card_set_text_qty`. (0.1.0) |
 | Badges page | `steamcommunity.com/profiles/{id}/badges` (HTML) | Nothing | Works without sign-in. Rows are `class="badge_row …"`, with card drops remaining in `badge_title_stats_drops`. (0.1.0) |
 | Inventory | `steamcommunity.com/inventory/{id}/753/6` | Sign-in | **Refused without sign-in** (429 on the first request). (0.1.0) |
-| Inventory, signed in | `IEconService/GetInventoryItemsWithDescriptions/v1` with a sign-in token, or the community inventory with the sign-in cookie | Sign-in | Not tested yet. (0.2.0) |
-| Market items per game | `steamcommunity.com/market/search/render?norender=1&category_753_Game[]=tag_app_{appid}` | Sign-in | **Refused without sign-in** (429 on the first request). (0.1.0) |
-| Price history | `steamcommunity.com/market/pricehistory` (signed in), or the `var line1` graph data in an item's market page | Sign-in | Not tested yet. (0.2.0) |
+| Inventory, signed in | `IEconService/GetInventoryItemsWithDescriptions/v1` with the sign-in Web API token | Sign-in | **Works** and is fast (under 0.2 s). Same `assets`/`descriptions` layout as the community inventory, inside `response`. Includes Points Shop items such as animated avatars, frames and stickers. (0.2.0) |
+| Market items per game | `steamcommunity.com/market/search/render?norender=1&category_753_Game[]=tag_app_{appid}` | Unknown | **Refused** with 429 on the first request, both without sign-in (0.1.0) and signed in (0.2.0). This is likely a block on the connection left over from 0.1.0, which retried market requests. Re-test after several hours before deciding. |
+| Price history | `steamcommunity.com/market/pricehistory` (signed in), or the `var line1` graph data in an item's market page | Sign-in | Not tested yet: the test needs an item from the market search. |
 | Points Shop catalog | `ILoyaltyRewardsService/QueryRewardItems/v1?appids[0]={appid}` | Nothing | Works without a key: 29 items for Counter-Strike 2. (0.1.0) |
-| Points Shop items owned | `IPlayerService/GetProfileItemsOwned/v1` | Sign-in token | 401 with an API key, as expected. Signed in: not tested yet. |
-| Steam Family library | `IFamilyGroupsService/GetFamilyGroupForUser` and `GetSharedLibraryApps` | Sign-in token | 401 with an API key, as expected. Signed in: not tested yet. |
-| Sign-in token | `store.steampowered.com/pointssummary/ajaxgetasyncconfig` (`data.webapi_token`) | Sign-in cookie | Not tested yet. The fallback is the token inside the `steamLoginSecure` cookie. |
+| Points Shop items owned | `IPlayerService/GetProfileItemsOwned/v1` | Sign-in token | **Works** signed in. The answer groups items into `animated_avatars`, `avatar_frames`, `mini_profile_backgrounds`, `profile_backgrounds` and so on. 401 with only an API key. (0.2.0) |
+| Steam Family library | `IFamilyGroupsService/GetFamilyGroupForUser`, then `GetSharedLibraryApps` | Sign-in token | **Works** signed in. The first returns `family_groupid` (or `is_not_member_of_any_group`); the second lists shared `apps` with their owners. 401 with only an API key. (0.2.0) |
+| Sign-in token | `store.steampowered.com/pointssummary/ajaxgetasyncconfig` (`data.webapi_token`) | Sign-in cookie | **Works.** Steam sets the store cookie during sign-in, and the sign-in lasts about 24 hours before the app renews it. (0.2.0) |
 
 ## Rate limits
 
