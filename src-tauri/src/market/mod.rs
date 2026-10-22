@@ -167,6 +167,19 @@ pub fn plain_name(name: &str) -> &str {
     n
 }
 
+/// Steam's item number from a Market name like "255710-Space Elevator
+/// (Profile Background)-13", which Steam uses when two items share a name.
+/// Only a number after the item's full name counts, so "750920-BG-1" (an
+/// item called "BG-1") has none.
+pub fn type_suffix(hash_name: &str, appid: u64, name: &str) -> Option<i64> {
+    let rest = hash_name.strip_prefix(&format!("{appid}-"))?;
+    let number = rest.strip_prefix(name)?.strip_prefix('-')?;
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
 pub fn parse_search(v: &Value) -> Option<SearchPage> {
     if v["success"].as_bool() != Some(true) {
         return None;
@@ -322,6 +335,29 @@ mod tests {
         assert!(parse_search(&json!({"success": false})).is_none());
         assert_eq!(class_of("Steam Gems"), (0, false));
         assert_eq!(class_of("Back to Bed Booster Pack"), (5, false));
+    }
+
+    #[test]
+    fn numbered_duplicates() {
+        let name = "Space Elevator (Profile Background)";
+        assert_eq!(
+            type_suffix(
+                "255710-Space Elevator (Profile Background)-13",
+                255710,
+                name
+            ),
+            Some(13)
+        );
+        assert_eq!(type_suffix("750920-BG-1", 750920, "BG-1"), None);
+        assert_eq!(
+            type_suffix(
+                "953490-Evidence Item #01-11",
+                953490,
+                "Evidence Item #01/11"
+            ),
+            None
+        );
+        assert_eq!(type_suffix("10-A-x", 10, "A"), None);
     }
 
     #[test]

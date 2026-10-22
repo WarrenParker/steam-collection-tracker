@@ -1455,10 +1455,34 @@ fn match_market(entries: &mut Vec<Entry>, rows: &[MarketRow], listed: impl Fn(u6
         }
     }
 
+    // Items that share a name get Steam's item number on the end of their
+    // Market name ("…(Profile Background)-13"), which matches exactly.
+    let mut typed: HashMap<(u64, i64, i64, bool), usize> = HashMap::new();
+    for (i, r) in rows.iter().enumerate() {
+        if !used[i] {
+            if let Some(t) = market::type_suffix(&r.hash_name, r.appid, &r.name) {
+                typed.entry((r.appid, r.class, t, r.foil)).or_insert(i);
+            }
+        }
+    }
+    for e in entries.iter_mut().filter(|e| e.market.is_none()) {
+        let hit = e
+            .item_type
+            .and_then(|t| typed.get(&(e.appid, e.class, t, e.foil)).copied());
+        if let Some(i) = hit.filter(|i| !used[*i]) {
+            e.market = Some(i);
+            used[i] = true;
+        }
+    }
+
     let mut names: HashMap<(u64, i64, bool, String), usize> = HashMap::new();
     let mut boosters: HashMap<u64, usize> = HashMap::new();
     for (i, r) in rows.iter().enumerate() {
         if used[i] || r.class == 0 || !listed(r.appid) {
+            continue;
+        }
+        // A numbered duplicate that matched nothing above isn't matched by name.
+        if market::type_suffix(&r.hash_name, r.appid, &r.name).is_some() {
             continue;
         }
         if r.class == class::BOOSTER {
@@ -1913,6 +1937,33 @@ mod tests {
         assert_eq!(snap.account.prices.cost, 550);
         assert_eq!(snap.account.currency, "USD");
         assert_eq!(snap.account.prices_at, Some(50));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn items_sharing_a_name_match_by_number() {
+        let (db, dir) = setup("numbered");
+        db.write(|tx| {
+            tx.execute_batch(
+                "UPDATE apps SET market_checked_at = 50 WHERE appid = 10;
+                 INSERT INTO items (appid, class, item_type, foil, name, title, in_points, points_cost, points_active, points_buyable, updated_at)
+                     VALUES (10, 3, 16, 0, 'Sky', 'Sky', 1, 500, 1, 1, 0);
+                 INSERT INTO market (hash_name, appid, class, foil, name, currency, lowest, listings, seen_at) VALUES
+                     ('10-Sky (Profile Background)-16', 10, 3, 0, 'Sky (Profile Background)', 1, 90, 3, 60),
+                     ('10-Sky (Profile Background)-6', 10, 3, 0, 'Sky (Profile Background)', 1, 40, 3, 60);",
+            )
+        })
+        .unwrap();
+        let snap = db.read(|c| compute(c, rules(false, false), 100)).unwrap();
+        let skies: Vec<ItemView> = snap
+            .game_items(10)
+            .into_iter()
+            .filter(|i| i.name == "Sky")
+            .collect();
+        assert_eq!(skies.len(), 2, "no extra Market-only copy");
+        let cost = |t: i64| skies.iter().find(|i| i.item_type == Some(t)).unwrap().cost;
+        assert_eq!((cost(6), cost(16)), (Some(40), Some(90)));
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
