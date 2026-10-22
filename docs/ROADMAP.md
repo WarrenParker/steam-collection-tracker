@@ -10,56 +10,56 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 
 ## Phase 0: Setup and proof (done)
 
-- [x] Windows build pipeline on GitHub, published releases and a self-updater. [0.1.0](../CHANGELOG.md#010---2026-10-21)
-- [x] First-time setup, overview counts and a connection test that runs on the user's PC. [0.1.0](../CHANGELOG.md#010---2026-10-21)
-- [x] Steam sign-in, moved up from a later phase. The first connection test showed that Steam refuses anonymous inventory and market requests. [0.2.0](../CHANGELOG.md#020---2026-10-21)
-- [x] Updates button, version history and switching, and automatic tidy-up. [0.2.0](../CHANGELOG.md#020---2026-10-21)
-- [x] Confirm the signed-in sources with a 0.2.0 connection test. Inventory, Points Shop items and the Steam Family library all work. The market still refused, which carries over to Phase 1. Results are in [STEAM-DATA.md](STEAM-DATA.md).
+- ✅ Windows build pipeline on GitHub, published releases and a self-updater. [0.1.0](../CHANGELOG.md#010---2026-10-21)
+- ✅ First-time setup, overview counts and a connection test that runs on the user's PC. [0.1.0](../CHANGELOG.md#010---2026-10-21)
+- ✅ Steam sign-in, moved up from a later phase. The first connection test showed that Steam refuses anonymous inventory and market requests. [0.2.0](../CHANGELOG.md#020---2026-10-21)
+- ✅ Updates button, version history and switching, and automatic tidy-up. [0.2.0](../CHANGELOG.md#020---2026-10-21)
+- ✅ Confirm the signed-in sources with a 0.2.0 connection test. Inventory, Points Shop items and the Steam Family library all work. The market still refused, which carries over to Phase 1. Results are in [STEAM-DATA.md](STEAM-DATA.md).
 
 ## Phase 1: Scanner and local database (testing)
 
-- [ ] Re-test the market once the block left by 0.1.0 has expired. The catalog no longer depends on it; prices in Phase 3 do.
-- [x] Full item catalog for every game. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- ⬜ Re-test the market once the block left by 0.1.0 has expired. The catalog no longer depends on it; prices in Phase 3 do.
+- ✅ Full item catalog for every game. [0.3.0](../CHANGELOG.md#030---2026-10-22)
   - cards and foil cards, from Steam's item definitions, with each game's card page as the fallback
   - emoticons and backgrounds, from the item definitions and the Points Shop
   - booster packs, one per game with cards
   - Points Shop items, from the public catalog
-- [x] A local SQLite database in the data folder. [0.3.0](../CHANGELOG.md#030---2026-10-22)
-- [x] Resumable, rate-safe background scanning, with incremental rescans and a time estimate before a long first scan. [0.3.0](../CHANGELOG.md#030---2026-10-22)
-- [x] Every game listed: owned, unowned (tagged) and family-shared (behind a setting). [0.3.0](../CHANGELOG.md#030---2026-10-22)
-- [ ] Confirm the new sources with a 0.3.0 connection test and a full scan of a real account.
+- ✅ A local SQLite database in the data folder. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- ✅ Resumable, rate-safe background scanning, with incremental rescans and a time estimate before a long first scan. [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- ✅ Every game listed: owned, unowned (tagged) and family-shared (behind a setting). [0.3.0](../CHANGELOG.md#030---2026-10-22)
+- ⬜ Confirm the new sources with a 0.3.0 connection test and a full scan of a real account.
 
 ## Phase 2: Completion and tags
 
-- [ ] Completion per game and for the whole account. By default a badge counts as owning its cards; a setting can require the cards too.
-- [ ] Tags: Unowned, Family shared, Points (no market price), Unobtainable, Limited/Event, Not marketable, Unverified, Price spike, Price dip.
-- [ ] Availability detection, with manual tag override.
+- ⬜ Completion per game and for the whole account. By default a badge counts as owning its cards; a setting can require the cards too.
+- ⬜ Tags: Unowned, Family shared, Points (no market price), Unobtainable, Limited/Event, Not marketable, Unverified, Price spike, Price dip.
+- ⬜ Availability detection, with manual tag override.
 
 ## Phase 3: Prices
 
-- [ ] Current, lowest historical and average price for every item.
-- [ ] Spike and dip tags with adjustable sensitivity.
-- [ ] Currency setting, USD by default.
-- [ ] Account value before market fees.
-- [ ] Cost to complete, with dollars and points shown separately.
+- ⬜ Current, lowest historical and average price for every item.
+- ⬜ Spike and dip tags with adjustable sensitivity.
+- ⬜ Currency setting, USD by default.
+- ⬜ Account value before market fees.
+- ⬜ Cost to complete, with dollars and points shown separately.
 
 ## Phase 4: Interface
 
-- [ ] Dashboard, sortable game list, sortable list of all items, and per-game art grid.
-- [ ] Item detail with a small price chart.
-- [ ] Full settings panel.
-- [ ] Virtualized lists, so tens of thousands of items stay smooth.
+- ⬜ Dashboard, sortable game list, sortable list of all items, and per-game art grid.
+- ⬜ Item detail with a small price chart.
+- ⬜ Full settings panel.
+- ⬜ Virtualized lists, so tens of thousands of items stay smooth.
 
 ## Phase 5: History and banner
 
-- [ ] Progress-over-time chart for your account.
-- [ ] Banner generator that exports a PNG of your progress and stats.
+- ⬜ Progress-over-time chart for your account.
+- ⬜ Banner generator that exports a PNG of your progress and stats.
 
 ## Phase 6: Polish and 1.0
 
-- [ ] First-run guide for friends.
-- [ ] A speed and memory pass.
-- [ ] Version 1.0.
+- ⬜ First-run guide for friends.
+- ⬜ A speed and memory pass.
+- ⬜ Version 1.0.
 
 ## Decisions
 
