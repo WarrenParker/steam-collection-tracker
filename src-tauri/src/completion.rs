@@ -453,6 +453,21 @@ pub fn compute(c: &Connection, rules: Rules, now: i64) -> rusqlite::Result<Snaps
         }
     }
 
+    // The card page only pictures the regular card, so foils borrow its image.
+    let card_images: HashMap<(u64, i64), String> = entries
+        .iter()
+        .filter(|e| e.class == class::CARD && !e.foil)
+        .filter_map(|e| Some(((e.appid, e.item_type?), e.image.clone()?)))
+        .collect();
+    for e in entries
+        .iter_mut()
+        .filter(|e| e.class == class::CARD && e.foil && e.image.is_none())
+    {
+        if let Some(t) = e.item_type {
+            e.image = card_images.get(&(e.appid, t)).cloned();
+        }
+    }
+
     let mut index = Index {
         exact: HashMap::new(),
         names: HashMap::new(),
@@ -784,9 +799,18 @@ fn is_marketable(e: &Entry, app: App) -> bool {
     }
     match e.class {
         class::CARD | class::BOOSTER => true,
-        class::EMOTICON | class::BACKGROUND => app.has_cards && !e.animated && !e.unlisted,
-        _ => false,
+        _ => is_card_set_item(e, app),
     }
+}
+
+/// An emoticon or background from a game's trading card set. In card games
+/// every static emoticon and background is one; Points Shop exclusives are
+/// animated or other kinds of item.
+fn is_card_set_item(e: &Entry, app: App) -> bool {
+    matches!(e.class, class::EMOTICON | class::BACKGROUND)
+        && app.has_cards
+        && !e.animated
+        && !e.unlisted
 }
 
 fn auto_availability(e: &Entry, app: App, now: i64) -> (Availability, Option<String>) {
@@ -806,6 +830,18 @@ fn auto_availability(e: &Entry, app: App, now: i64) -> (Availability, Option<Str
     }
     if e.class == class::CARD || e.class == class::BOOSTER || !e.in_points {
         return (Availability::Available, None);
+    }
+    if is_card_set_item(e, app) {
+        // Crafting the badge hands these out, and they trade on the Market,
+        // whatever the Points Shop does.
+        let sold = e.points_active != Some(false)
+            && e.points_until.is_none_or(|u| u > now)
+            && e.points_buyable != Some(0);
+        let note = (!sold).then(|| {
+            "Not sold in the Points Shop. Crafting the badge can give it, and it's on the Market."
+                .to_string()
+        });
+        return (Availability::Available, note);
     }
     if e.points_active == Some(false) {
         return (
@@ -1000,8 +1036,10 @@ mod tests {
                      (10, 4, 5, 0, ':smile:', ':smile:', 1, 100, 1, 1, 0),
                      (10, 3, 6, 0, 'Sky', 'Sky', 1, 500, 1, 1, 0),
                      (10, 15, 7, 0, 'Spin', 'Spin', 1, 3000, 1, 0, 0),
+                     (10, 4, 9, 0, ':frown:', ':frown:', 1, 100, 1, 0, 0),
                      (10, 14, 8, 0, 'Gone', 'Gone', 1, 2000, 0, 1, 0),
                      (20, 11, 1, 0, 'Wave', 'Wave', 1, 1000, 1, 1, 0);
+                 UPDATE items SET image = 'alpha.png' WHERE appid = 10 AND class = 2 AND item_type = 3 AND foil = 0;
                  INSERT INTO badges (appid, badgeid, foil, level) VALUES (10, 1, 0, 3);
                  INSERT INTO inventory (classid, instanceid, appid, class, item_type, foil, name, marketable, stacks, quantity) VALUES
                      ('a', '0', 10, 2, 3, 0, 'Alpha', 1, 1, 4),
@@ -1041,6 +1079,11 @@ mod tests {
         assert_eq!((beta_foil.have, beta_foil.needed), (1, 1));
         let alpha_foil = items.iter().find(|i| i.name == "Alpha" && i.foil).unwrap();
         assert_eq!(alpha_foil.have, 0);
+        assert_eq!(
+            alpha_foil.image.as_deref(),
+            Some("alpha.png"),
+            "foils borrow the card's image"
+        );
 
         // Keeping a set: one more copy per card on top of the badge.
         let snap = db.read(|c| compute(c, rules(true, false), 100)).unwrap();
@@ -1078,6 +1121,14 @@ mod tests {
         assert!(spin.tags.contains(&tag::POINTS) && spin.tags.contains(&tag::NOT_MARKETABLE));
         assert!(!spin.tags.contains(&tag::UNVERIFIED));
 
+        let frown = items.iter().find(|i| i.name == ":frown:").unwrap();
+        assert_eq!(
+            frown.availability,
+            Availability::Available,
+            "crafting still gives card-set items"
+        );
+        assert!(frown.note.is_some());
+
         let gone = items.iter().find(|i| i.name == "Gone").unwrap();
         assert_eq!(gone.availability, Availability::Unobtainable);
         assert!(!gone.counted);
@@ -1102,20 +1153,20 @@ mod tests {
         );
         assert!(!wave[0].tags.contains(&tag::UNOWNED));
 
-        // Game 10 counts 4 cards, 1 emoticon, 1 background, 1 avatar: 7 items.
+        // Game 10 counts 4 cards, 2 emoticons, 1 background, 1 avatar: 8 items.
         let g = &snap.games[&10];
-        assert_eq!(g.total, 7);
+        assert_eq!(g.total, 8);
         assert_eq!(g.unobtainable, 2);
         assert_eq!(g.unobtainable_owned, 1);
-        // Alpha 1 + Beta 0.6 + Beta foil 1 + emoticon 1 + avatar 1 = 4.6 of 7.
+        // Alpha 1 + Beta 0.6 + Beta foil 1 + emoticon 1 + avatar 1 = 4.6 of 8.
         assert_eq!(g.owned, 4.6);
-        assert_eq!(g.percent, Some(65.7));
+        assert_eq!(g.percent, Some(57.5));
         assert_eq!(g.badge_level, 3);
         assert!(!g.cards_complete);
 
         // Only owned games count for the account; the sale event doesn't.
         assert_eq!(snap.account.games, 1);
-        assert_eq!(snap.account.total, 7);
+        assert_eq!(snap.account.total, 8);
         assert!(
             !snap.games.contains_key(&30),
             "family games hidden while the setting is off"
@@ -1150,10 +1201,10 @@ mod tests {
             .unwrap();
         assert!(spin.overridden && !spin.counted);
         assert_eq!(spin.auto_availability, Availability::Limited);
-        assert_eq!(snap.games[&10].total, 6);
+        assert_eq!(snap.games[&10].total, 7);
         db.write(|tx| set_override(tx, &spin_key, None, 2)).unwrap();
         let snap = db.read(|c| compute(c, rules(false, false), 100)).unwrap();
-        assert_eq!(snap.games[&10].total, 7);
+        assert_eq!(snap.games[&10].total, 8);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
