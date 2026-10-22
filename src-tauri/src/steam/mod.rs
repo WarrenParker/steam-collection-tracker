@@ -546,6 +546,30 @@ impl SteamClient {
         self.fetch(Bucket::WebApi, &url, None, notify).await
     }
 
+    /// Achievement progress (unlocked and total) for a batch of games.
+    pub async fn achievements_progress(
+        &self,
+        auth: Auth<'_>,
+        steam_id: &str,
+        appids: &[u64],
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let ids: Vec<(String, String)> = appids
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (format!("appids[{i}]"), a.to_string()))
+            .collect();
+        let mut params: Vec<(&str, &str)> = vec![("steamid", steam_id), ("language", "english")];
+        match auth {
+            Auth::None => {}
+            Auth::Key(k) => params.push(("key", k)),
+            Auth::Token(t) => params.push(("access_token", t)),
+        }
+        params.extend(ids.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        let url = webapi_url("/IPlayerService/GetAchievementsProgress/v1/", &params);
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
     /// A game's card page, read without sign-in.
     pub async fn card_page(
         &self,
@@ -656,6 +680,31 @@ pub fn parse_owned_games(v: &Value) -> OwnedGames {
     }
 }
 
+/// (game, unlocked, total) from a `GetAchievementsProgress` answer. `None`
+/// means it wasn't an achievements answer.
+pub fn parse_achievements(v: &Value) -> Option<Vec<(u64, u64, u64)>> {
+    let resp = v.get("response")?;
+    if !resp.is_object() {
+        return None;
+    }
+    let list = resp["achievement_progress"]
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[]);
+    Some(
+        list.iter()
+            .filter_map(|a| {
+                let n = |k: &str| inventory::as_u64(&a[k]);
+                Some((
+                    n("appid")?,
+                    n("unlocked").unwrap_or(0),
+                    n("total").unwrap_or(0),
+                ))
+            })
+            .collect(),
+    )
+}
+
 pub fn parse_badges(v: &Value) -> Badges {
     let resp = &v["response"];
     let list = resp["badges"]
@@ -724,6 +773,24 @@ mod tests {
         ]}}));
         assert_eq!(some.games.len(), 2);
         assert_eq!(some.games[0].playtime_minutes, 90);
+    }
+
+    #[test]
+    fn achievements() {
+        let v = json!({"response": {"achievement_progress": [
+            {"appid": 440, "unlocked": 12, "total": 520, "percentage": 2.3, "all_unlocked": false},
+            {"appid": 570, "unlocked": 0, "total": 0},
+            {"unlocked": 3}
+        ]}});
+        assert_eq!(
+            parse_achievements(&v).unwrap(),
+            vec![(440, 12, 520), (570, 0, 0)]
+        );
+        assert_eq!(
+            parse_achievements(&json!({"response": {}})).unwrap(),
+            vec![]
+        );
+        assert!(parse_achievements(&json!({})).is_none());
     }
 
     #[test]

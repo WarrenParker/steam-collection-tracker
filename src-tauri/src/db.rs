@@ -128,10 +128,14 @@ COMMIT;
 "#;
 
 /// 0.3.1: catalogs read from card pages in 0.3.0 numbered cards by their place
-/// in the set. They're read again so the numbers match Steam's.
+/// in the set, so they're read again with Steam's numbers. Games also get
+/// achievement progress.
 const MIGRATE_V2: &str = "
 BEGIN;
 UPDATE apps SET catalog_checked_at = NULL WHERE catalog_source = 'card_page';
+ALTER TABLE apps ADD COLUMN ach_unlocked INTEGER;
+ALTER TABLE apps ADD COLUMN ach_total INTEGER;
+ALTER TABLE apps ADD COLUMN ach_checked_at INTEGER;
 PRAGMA user_version = 2;
 COMMIT;
 ";
@@ -622,6 +626,38 @@ pub fn save_catalog(
     Ok(())
 }
 
+/// Owned games whose achievement progress is missing or older than `before`.
+pub fn apps_needing_achievements(c: &Connection, before: i64) -> rusqlite::Result<Vec<u64>> {
+    let mut st = c.prepare(
+        "SELECT appid FROM apps WHERE owned = 1 AND appid <> 753
+         AND (ach_checked_at IS NULL OR ach_checked_at < ?1) ORDER BY appid",
+    )?;
+    let rows = st.query_map([before], |r| r.get::<_, i64>(0))?;
+    rows.map(|r| r.map(|a| a as u64)).collect()
+}
+
+/// Saves achievement progress: (game, unlocked, total) for each game asked about.
+pub fn save_achievements(
+    c: &Connection,
+    asked: &[u64],
+    progress: &[(u64, u64, u64)],
+) -> rusqlite::Result<()> {
+    let t = now();
+    let mut mark = c.prepare(
+        "UPDATE apps SET ach_checked_at = ?2, ach_unlocked = COALESCE(ach_unlocked, 0),
+             ach_total = COALESCE(ach_total, 0)
+         WHERE appid = ?1",
+    )?;
+    for appid in asked {
+        mark.execute(params![*appid as i64, t])?;
+    }
+    let mut st = c.prepare("UPDATE apps SET ach_unlocked = ?2, ach_total = ?3 WHERE appid = ?1")?;
+    for (appid, unlocked, total) in progress {
+        st.execute(params![*appid as i64, *unlocked as i64, *total as i64])?;
+    }
+    Ok(())
+}
+
 /// Names and Steam item numbers of the cards the user owns for a game.
 pub fn owned_card_types(c: &Connection, appid: u64) -> rusqlite::Result<Vec<(String, i64)>> {
     let mut st = c.prepare(
@@ -731,6 +767,23 @@ pub struct CatalogCounts {
     pub items: u64,
     pub points_items: u64,
     pub by_kind: Vec<KindCount>,
+    /// Owned games that have any collectible items.
+    #[serde(default)]
+    pub owned_with_items: u64,
+    /// Owned games with achievements, and how many of those are started.
+    #[serde(default)]
+    pub ach_games: u64,
+    #[serde(default)]
+    pub ach_started: u64,
+    #[serde(default)]
+    pub ach_perfect: u64,
+    /// Average completion of started games, 0 to 100, as Steam counts it.
+    #[serde(default)]
+    pub ach_average: Option<f64>,
+    #[serde(default)]
+    pub ach_unlocked: u64,
+    #[serde(default)]
+    pub ach_total: u64,
 }
 
 pub fn catalog_counts(c: &Connection, family: bool) -> rusqlite::Result<CatalogCounts> {
@@ -741,7 +794,15 @@ pub fn catalog_counts(c: &Connection, family: bool) -> rusqlite::Result<CatalogC
                  SUM(a.owned = 0 AND NOT (a.family = 1 AND ?1)),
                  SUM(a.owned = 0 AND a.family = 1 AND ?1),
                  SUM(a.has_cards = 1),
-                 SUM(a.catalog_checked_at IS NOT NULL)
+                 SUM(a.catalog_checked_at IS NOT NULL),
+                 SUM(a.owned = 1 AND EXISTS (SELECT 1 FROM items i WHERE i.appid = a.appid AND i.class <> 1)),
+                 SUM(a.owned = 1 AND a.ach_total > 0),
+                 SUM(a.owned = 1 AND a.ach_unlocked > 0),
+                 SUM(a.owned = 1 AND a.ach_total > 0 AND a.ach_unlocked >= a.ach_total),
+                 AVG(CASE WHEN a.owned = 1 AND a.ach_unlocked > 0 AND a.ach_total > 0
+                     THEN 100.0 * a.ach_unlocked / a.ach_total END),
+                 SUM(CASE WHEN a.owned = 1 THEN a.ach_unlocked END),
+                 SUM(CASE WHEN a.owned = 1 THEN a.ach_total END)
              FROM apps a WHERE {LISTED}"
         ),
         params![family],
@@ -756,6 +817,13 @@ pub fn catalog_counts(c: &Connection, family: bool) -> rusqlite::Result<CatalogC
                 games_family: n(3)?,
                 games_with_cards: n(4)?,
                 games_cataloged: n(5)?,
+                owned_with_items: n(6)?,
+                ach_games: n(7)?,
+                ach_started: n(8)?,
+                ach_perfect: n(9)?,
+                ach_average: r.get::<_, Option<f64>>(10)?,
+                ach_unlocked: n(11)?,
+                ach_total: n(12)?,
                 ..CatalogCounts::default()
             })
         },
@@ -817,6 +885,8 @@ pub struct GameRow {
     pub badge_level: Option<u64>,
     pub foil_badge: bool,
     pub playtime_minutes: u64,
+    pub ach_unlocked: Option<u64>,
+    pub ach_total: Option<u64>,
 }
 
 pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
@@ -828,7 +898,8 @@ pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
              (SELECT COUNT(*) FROM items i WHERE i.appid = a.appid AND i.class <> 1 AND i.in_points = 1),
              (SELECT COALESCE(SUM(v.quantity), 0) FROM inventory v WHERE v.appid = a.appid),
              (SELECT MAX(b.level) FROM badges b WHERE b.appid = a.appid AND b.foil = 0),
-             EXISTS (SELECT 1 FROM badges b WHERE b.appid = a.appid AND b.foil = 1)
+             EXISTS (SELECT 1 FROM badges b WHERE b.appid = a.appid AND b.foil = 1),
+             a.ach_unlocked, a.ach_total
          FROM apps a WHERE {LISTED}
          ORDER BY a.name COLLATE NOCASE, a.appid"
     ))?;
@@ -852,6 +923,8 @@ pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
             your_items: count(11)?,
             badge_level: r.get::<_, Option<i64>>(12)?.map(|l| l.max(0) as u64),
             foil_badge: r.get::<_, i64>(13)? != 0,
+            ach_unlocked: r.get::<_, Option<i64>>(14)?.map(|v| v.max(0) as u64),
+            ach_total: r.get::<_, Option<i64>>(15)?.map(|v| v.max(0) as u64),
         })
     })?;
     rows.collect()
@@ -1061,6 +1134,55 @@ mod tests {
             .unwrap();
         assert_eq!(upgrade.len(), 1);
         assert!(upgrade[0].upgrade_only);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn achievement_progress() {
+        let (db, dir) = temp_db("ach");
+        let owned = vec![
+            OwnedGame {
+                appid: 10,
+                name: "A".into(),
+                playtime_minutes: 1,
+            },
+            OwnedGame {
+                appid: 20,
+                name: "B".into(),
+                playtime_minutes: 1,
+            },
+            OwnedGame {
+                appid: 30,
+                name: "C".into(),
+                playtime_minutes: 1,
+            },
+        ];
+        let item_apps = BTreeMap::new();
+        db.write(|tx| {
+            save_library(
+                tx,
+                &LibraryUpdate {
+                    owned: Some(&owned),
+                    family: None,
+                    item_apps: &item_apps,
+                    reset_items: true,
+                },
+            )?;
+            save_achievements(tx, &[10, 20, 30], &[(10, 10, 10), (20, 5, 20)])
+        })
+        .unwrap();
+        let counts = db.read(|c| catalog_counts(c, false)).unwrap();
+        assert_eq!(
+            (counts.ach_games, counts.ach_started, counts.ach_perfect),
+            (2, 2, 1)
+        );
+        assert_eq!(counts.ach_average, Some(62.5), "average of 100% and 25%");
+        assert_eq!((counts.ach_unlocked, counts.ach_total), (15, 30));
+        assert!(db
+            .read(|c| apps_needing_achievements(c, now() - 60))
+            .unwrap()
+            .is_empty());
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

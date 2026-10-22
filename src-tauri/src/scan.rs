@@ -28,7 +28,9 @@ use crate::db::{self, CatalogCounts, CatalogTarget, LibraryUpdate};
 use crate::paths::AppPaths;
 use crate::session::{self, Session};
 use crate::state::AppState;
-use crate::steam::{inventory, Auth, Bucket, Fetched, Notify, ProfileView, BLOCK_MINUTES};
+use crate::steam::{
+    inventory, parse_achievements, Auth, Bucket, Fetched, Notify, ProfileView, BLOCK_MINUTES,
+};
 
 pub const PRIVATE_PROFILE: &str = "Your Steam profile is private, so the app can't see your games, badges or inventory. In Steam's privacy settings, set My profile, Game details and Inventory to Public.";
 pub const PRIVATE_GAMES: &str = "Your game details are private, so owned games can't be counted. In Steam's privacy settings, set Game details to Public.";
@@ -52,6 +54,8 @@ const SLOW_SECONDS: f64 = 4.2;
 /// for a game that has them, the scan switches to card pages.
 const EMPTY_DEFS_LIMIT: u32 = 5;
 const MAX_POINTS_PAGES: usize = 40;
+/// Games per achievement progress request.
+const ACH_PER_REQUEST: usize = 100;
 /// Games in a row that Steam refused to list before the scan takes a break.
 const LIMITED_IN_A_ROW: u32 = 3;
 const MAX_INVENTORY_PAGES: u32 = 200;
@@ -587,6 +591,41 @@ async fn read_library(
         }
         db::set_meta(tx, META_LIBRARY_READ, &db::now().to_string())
     })?;
+
+    // Achievement progress for every owned game: a couple of quick requests.
+    ctx.label("Reading your achievements…");
+    let ach_apps = state
+        .db
+        .read(|c| db::apps_needing_achievements(c, db::now()))?;
+    let mut auths: Vec<Auth> = vec![Auth::Key(key)];
+    if let Some(t) = token {
+        auths.push(Auth::Token(t));
+    }
+    let mut auth_index = 0usize;
+    'achievements: for batch in ach_apps.chunks(ACH_PER_REQUEST) {
+        loop {
+            let Some(auth) = auths.get(auth_index).copied() else {
+                break 'achievements;
+            };
+            let f = state
+                .steam
+                .achievements_progress(auth, steam_id, batch, notify)
+                .await?;
+            if f.status == 401 || f.status == 403 {
+                auth_index += 1;
+                continue;
+            }
+            match f.json().as_ref().and_then(parse_achievements) {
+                Some(progress) => {
+                    state
+                        .db
+                        .write(|tx| db::save_achievements(tx, batch, &progress))?;
+                    break;
+                }
+                None => break 'achievements,
+            }
+        }
+    }
 
     let owned: std::collections::HashSet<u64> = games.games.iter().map(|g| g.appid).collect();
     let apps_not_owned = if games.visible {

@@ -70,6 +70,7 @@ const PLAN: &[(&str, &str)] = &[
     ("sign_in", "Steam sign-in"),
     ("owned_games", "Owned games"),
     ("badges", "Badges"),
+    ("achievements", "Achievement progress"),
     ("inventory", "Inventory"),
     ("market_search", "Market items for one game"),
     ("price_history", "Price history for one item"),
@@ -364,6 +365,86 @@ pub async fn run(
             run.finish("badges", t, status, text, http_detail(&f, 4));
         }
         Err(e) => run.finish("badges", t, StepStatus::Fail, e, Value::Null),
+    }
+
+    // 4b. Achievement progress for a batch of owned games
+    let t = run.start("achievements");
+    let batch: Vec<u64> = owned_apps.iter().copied().take(50).collect();
+    if batch.is_empty() {
+        run.finish(
+            "achievements",
+            t,
+            StepStatus::Skipped,
+            "Skipped because no owned games were read.",
+            Value::Null,
+        );
+    } else {
+        let mut auths: Vec<Auth> = vec![Auth::Key(key.as_str())];
+        if let Some(tok) = token.as_deref() {
+            auths.push(Auth::Token(tok));
+        }
+        let mut attempts = Map::new();
+        let mut result: Option<(Vec<(u64, u64, u64)>, &str)> = None;
+        for auth in &auths {
+            match steam
+                .achievements_progress(*auth, &sid, &batch, notify)
+                .await
+            {
+                Ok(f) => {
+                    attempts.insert(auth.name().into(), http_detail(&f, 3));
+                    if f.status == 401 || f.status == 403 {
+                        continue;
+                    }
+                    result = f
+                        .json()
+                        .as_ref()
+                        .and_then(crate::steam::parse_achievements)
+                        .map(|p| (p, auth.name()));
+                    break;
+                }
+                Err(e) => {
+                    attempts.insert(auth.name().into(), json!({ "error": e }));
+                    break;
+                }
+            }
+        }
+        match result {
+            Some((progress, auth)) => {
+                let with = progress.iter().filter(|(_, _, total)| *total > 0).count();
+                let started: Vec<f64> = progress
+                    .iter()
+                    .filter(|(_, u, total)| *total > 0 && *u > 0)
+                    .map(|(_, u, total)| *u as f64 / *total as f64 * 100.0)
+                    .collect();
+                let average = if started.is_empty() {
+                    "no games started yet".to_string()
+                } else {
+                    format!(
+                        "average completion {:.0}%",
+                        started.iter().sum::<f64>() / started.len() as f64
+                    )
+                };
+                run.finish(
+                    "achievements",
+                    t,
+                    StepStatus::Ok,
+                    format!(
+                        "Works with your {}: {} of {} games checked have achievements; {average}.",
+                        if auth == "key" { "API key" } else { "sign-in" },
+                        with,
+                        progress.len()
+                    ),
+                    Value::Object(attempts),
+                );
+            }
+            None => run.finish(
+                "achievements",
+                t,
+                StepStatus::Warn,
+                "Steam didn't return achievement progress.",
+                Value::Object(attempts),
+            ),
+        }
     }
 
     // 5. Inventory: the signed-in Web API first, then the community inventory

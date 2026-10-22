@@ -82,6 +82,13 @@ export interface CatalogCounts {
   items: number;
   points_items: number;
   by_kind: KindCount[];
+  owned_with_items: number;
+  ach_games: number;
+  ach_started: number;
+  ach_perfect: number;
+  ach_average: number | null;
+  ach_unlocked: number;
+  ach_total: number;
 }
 
 export type ScanState = 'idle' | 'running' | 'paused' | 'waiting' | 'done' | 'failed';
@@ -116,6 +123,8 @@ export interface GameRow {
   badge_level: number | null;
   foil_badge: boolean;
   playtime_minutes: number;
+  ach_unlocked: number | null;
+  ach_total: number | null;
 }
 
 export type StepStatus = 'pending' | 'running' | 'ok' | 'warn' | 'fail' | 'skipped';
