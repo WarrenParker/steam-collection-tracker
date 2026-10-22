@@ -92,9 +92,9 @@ jobs:
           encode() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
           touch build.log
           if [ "${{ job.status }}" = "success" ]; then
-            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists" build.log; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40; } | encode)
+            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
             echo "::notice title=Build report::${body}"
           else
-            body=$(grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log | tail -n 150 | encode)
+            body=$( { grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log || true; } | tail -n 150 | encode)
             echo "::error title=Build failed::${body}"
           fi
