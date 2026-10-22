@@ -36,8 +36,9 @@ const HISTORY_SPREAD_DAYS: i64 = 7;
 const RETRY_DAYS: i64 = 1;
 /// A first price history fill expected to take longer than this waits for a go-ahead.
 const CONFIRM_SECONDS: f64 = 10.0 * 60.0;
-/// Seconds per Market request, until real timings take over.
-pub const SECONDS_PER_REQUEST: f64 = 4.2;
+/// Seconds per Market request on long reads, which the request budget holds
+/// to about one every 7.5 seconds.
+pub const SECONDS_PER_REQUEST: f64 = 7.5;
 /// A game with more items than this on the Market is cut short.
 const MAX_SEARCH_ITEMS: u64 = 3000;
 /// Market searches in a row that fail before the stage gives up for now.
@@ -45,6 +46,8 @@ const MAX_FAILURES: u32 = 5;
 
 const META_CURRENCY: &str = market::META_CURRENCY;
 const META_CURRENCY_AT: &str = "market_currency_at";
+/// The Market pace, kept slower after Steam refused a long read.
+const META_MARKET_PERIOD: &str = "market_period_ms";
 /// Something always on the Market, used to learn which currency Steam answers in.
 const PROBE_ITEM: &str = "753-Sack of Gems";
 const RATES_URL: &str = "https://api.frankfurter.dev/v2/rates";
@@ -79,6 +82,14 @@ fn waiting() -> RunEnd {
     RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60)
 }
 
+/// Saves the Market pace, which a refusal slows down, for the next run.
+fn save_pace(state: &AppState) {
+    let ms = state.steam.market_period_ms().to_string();
+    let _ = state
+        .db
+        .write(|tx| db::set_meta(tx, META_MARKET_PERIOD, &ms));
+}
+
 /// Stages 5 and 6.
 pub(crate) async fn stages(
     ctx: &Ctx<'_>,
@@ -86,6 +97,30 @@ pub(crate) async fn stages(
     resume: bool,
     cookie: Option<&str>,
 ) -> Result<RunEnd, String> {
+    let state = ctx.state;
+    let notify = ctx.notify;
+    let data = &state.db;
+    let signed_in = cookie.is_some();
+    if let Some(ms) = data
+        .read(|c| db::get_meta(c, META_MARKET_PERIOD))?
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        state.steam.set_market_period_ms(ms);
+    }
+    let outcome = run_stages(ctx, family_on, resume, cookie).await;
+    if matches!(outcome, Ok(RunEnd::Waiting(_))) {
+        save_pace(state);
+    }
+    outcome
+}
+
+async fn run_stages(
+    ctx: &Ctx<'_>,
+    family_on: bool,
+    resume: bool,
+    cookie: Option<&str>,
+) -> Result<RunEnd, String> {
+    let period = || ctx.state.steam.market_period_ms() as f64 / 1000.0;
     let state = ctx.state;
     let notify = ctx.notify;
     let data = &state.db;
@@ -179,7 +214,7 @@ pub(crate) async fn stages(
             data.write(|tx| db::finish_market_app(tx, *appid, started))?;
         }
         pages_left = pages_left.saturating_sub(expected);
-        ctx.progress(i as u64 + 1, Some(timer.estimate(pages_left)));
+        ctx.progress(i as u64 + 1, Some(timer.estimate(pages_left, period())));
     }
 
     // Stage 6: order books for cards that still need several copies, then
@@ -239,7 +274,7 @@ pub(crate) async fn stages(
             data.write(|tx| db::save_book(tx, hash, &b, db::now()))?;
         }
         done += 1;
-        ctx.progress(done, Some(timer.estimate(total - done)));
+        ctx.progress(done, Some(timer.estimate(total - done, period())));
     }
 
     ctx.label("Reading price history…");
@@ -261,7 +296,7 @@ pub(crate) async fn stages(
             }
         }
         done += 1;
-        ctx.progress(done, Some(timer.estimate(total - done)));
+        ctx.progress(done, Some(timer.estimate(total - done, period())));
     }
 
     Ok(RunEnd::Done { seconds: 0 })
@@ -285,12 +320,19 @@ impl Timer {
         s.1 += started.elapsed().as_secs_f64();
     }
 
-    fn estimate(&self, requests_left: u64) -> u64 {
+    /// Time left for `requests_left` more requests. Past the budget's short
+    /// burst, requests go out no faster than the long-read pace.
+    fn estimate(&self, requests_left: u64, period_secs: f64) -> u64 {
         let s = self.spent.lock().unwrap_or_else(|e| e.into_inner());
-        let per = if s.0 >= 3 {
+        let measured = if s.0 >= 3 {
             s.1 / f64::from(s.0)
         } else {
             SECONDS_PER_REQUEST
+        };
+        let per = if requests_left as f64 > crate::steam::budget::BURST {
+            measured.max(period_secs)
+        } else {
+            measured
         };
         (requests_left as f64 * per).ceil() as u64
     }

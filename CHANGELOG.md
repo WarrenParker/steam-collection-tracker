@@ -2,6 +2,20 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.6.2] - 2026-10-22
+
+### Changed
+
+- **Long Market reads go slower so Steam doesn't take a break.** Steam paused a scan for 30 minutes after about 885 Market requests in an hour. Short bursts still go at the usual pace, so clicks and small scans stay quick, but long reads now send about 480 requests an hour, one every 7.5 seconds. If Steam still refuses, the app slows down by half again and remembers it.
+- Opening a game, the Games tab and the overview is faster: completion and prices are worked out once and reused until something changes.
+- The To complete column puts points on their own line, and sorting it from high to low starts with the games that cost the most money.
+- The Prices settings give their descriptions more room.
+
+### Security
+
+- The app window only loads images from Steam's image servers.
+- Exchange rates and Market image ids are checked before they're used.
+
 ## [0.6.1] - 2026-10-22
 
 ### Changed

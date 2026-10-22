@@ -6,6 +6,7 @@
 //! of request has its own minimum gap, and when Steam refuses one (HTTP 429) the
 //! client stops sending that kind of request for a while instead of retrying.
 
+pub mod budget;
 pub mod inventory;
 
 use std::collections::HashMap;
@@ -144,6 +145,8 @@ pub struct SteamClient {
     blocked: std::sync::Mutex<HashMap<(Bucket, bool), Instant>>,
     requests: AtomicU32,
     browser_agent: std::sync::Mutex<Option<String>>,
+    /// Keeps long Market reads under the rate Steam refuses.
+    market_budget: std::sync::Mutex<budget::Budget>,
 }
 
 impl SteamClient {
@@ -164,6 +167,7 @@ impl SteamClient {
             blocked: std::sync::Mutex::new(HashMap::new()),
             requests: AtomicU32::new(0),
             browser_agent: std::sync::Mutex::new(None),
+            market_budget: std::sync::Mutex::new(budget::Budget::default()),
         }
     }
 
@@ -190,6 +194,29 @@ impl SteamClient {
             (bucket, signed_in),
             Instant::now() + Duration::from_secs(BLOCK_MINUTES * 60),
         );
+        drop(blocked);
+        if bucket == Bucket::Market {
+            self.market_budget
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .slow_down();
+        }
+    }
+
+    /// Time per Market request on long reads, in milliseconds.
+    pub fn market_period_ms(&self) -> u64 {
+        self.market_budget
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .period_ms()
+    }
+
+    /// Restores a slower Market pace saved after an earlier refusal.
+    pub fn set_market_period_ms(&self, ms: u64) {
+        self.market_budget
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_period_ms(ms);
     }
 
     async fn pace(&self, bucket: Bucket) {
@@ -199,6 +226,16 @@ impl SteamClient {
             let min = bucket.min_interval();
             if elapsed < min {
                 tokio::time::sleep(min - elapsed).await;
+            }
+        }
+        if bucket == Bucket::Market {
+            let wait = self
+                .market_budget
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(Instant::now());
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
             }
         }
         last.insert(bucket, Instant::now());
