@@ -17,7 +17,7 @@ What the app reads from Steam, where it comes from, and what each connection tes
 | Inventory, signed in | `IEconService/GetInventoryItemsWithDescriptions/v1` with the sign-in Web API token | Sign-in | **Works** and is fast (under 0.2 s). Same `assets`/`descriptions` layout as the community inventory, inside `response`. Includes Points Shop items such as animated avatars, frames and stickers. (0.2.0) |
 | Market items per game | `steamcommunity.com/market/search/render?norender=1&category_753_Game[]=tag_app_{appid}` | A browser identity | **Works** from 0.4.1: 26 items for Counter-Strike 2, signed in, in 0.2 s. Before that the app was refused (429) even after nine hours, while the same URL worked in a browser on the same connection, so Steam was turning away the app's own identity. The app now sends the WebView2 browser identity and browser headers for Community and Market requests. (0.4.1) |
 | Price history | `steamcommunity.com/market/pricehistory?appid=753&market_hash_name=…` | Sign-in | **Works** signed in: 5,572 data points for `730-:csgoa:`, from May 2013 to today, in hourly then daily points `[date, price, volume]`. (0.4.1) |
-| Points Shop catalog | `ILoyaltyRewardsService/QueryRewardItems/v1?appids[0]={appid}` | Nothing | **Works** for several games per request (`appids[0]`…), 100 items per page with `next_cursor`. `include_direct_purchase_disabled=true` adds items that can't be bought directly, such as sale rewards: 4 more for Counter-Strike 2. (0.4.0) |
+| Points Shop catalog | `ILoyaltyRewardsService/QueryRewardItems/v1?appids[0]={appid}` | Nothing | **Works** for several games per request (`appids[0]`…), 100 items per page with `next_cursor`. `include_direct_purchase_disabled=true` adds items that can't be bought directly. (0.4.0) Reading each batch with and without it (0.5.0): of 2,930 Points Shop items for the account's games, 2,826 are sold on their own, 79 only inside a bundle (Counter-Strike 2's extra 4 among them), and 25 neither: DEATHLOOP's card-set emoticons and backgrounds, and QuakeCon reward items. |
 | Games with a Points Shop page | `ILoyaltyRewardsService/GetEligibleApps/v1` | Nothing | **Works**: 14,254 games and 122 sale events. `event_app` marks the sale events. (0.4.0) |
 | Emoticons owned | `IPlayerService/GetEmoticonList/v1` | Not public | **Not available** (404 with the sign-in token). Owned emoticons come from the inventory, which includes Points Shop emoticons. (0.4.0) |
 | Points Shop items owned | `IPlayerService/GetProfileItemsOwned/v1` | Sign-in token | **Works** signed in. The answer groups items into `animated_avatars`, `avatar_frames`, `mini_profile_backgrounds`, `profile_backgrounds` and so on. 401 with only an API key. (0.2.0) |
@@ -91,3 +91,10 @@ Each catalog is checked against [SteamCardExchange](https://www.steamcardexchang
 | Vampire Survivors (1794680) | 5 | 5 | 3 |
 
 **Gap:** items outside the card set that the Points Shop no longer lists are missing. Counter-Strike 2 has 75 more emoticons on SteamCardExchange (steam.tv drops such as FACEIT 2018), plus a few retired profile items.
+
+**Oct 22, 2026 (0.5.0 completion).**
+
+- Badge levels match the profile's badges page: Counter-Strike 2 and Back to Bed at level 5, 399670 at level 1, no foil badges, and 7 other badges.
+- Owned card quantities on the card pages match the inventory for Back to Bed (regular and foil) and Kingdom Rush.
+- SteamCardExchange's page for The Last of Us Part I (1888930) lists 9 cards, 6 emoticons, 9 backgrounds, 5 stickers, 2 avatar frames, 3 animated avatars and a startup movie, the same as the catalog. Its emoticons and backgrounds have Market prices and the rest don't, which matches the Points and Not marketable tags.
+- The app's completion figures matched a separate calculation from the same database: 30 of 5,501 items complete and 17 of 194 games started with Steam Family games on, and Back to Bed at 68.2% (62.9% with "Also need the cards in my inventory").
