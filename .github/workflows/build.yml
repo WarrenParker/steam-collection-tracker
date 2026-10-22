@@ -23,10 +23,11 @@ jobs:
     runs-on: windows-latest
     env:
       UPDATE_REPO: ${{ github.repository }}
+      CARGO_TERM_COLOR: never
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -115,6 +116,9 @@ jobs:
             body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists|CHANGELOG" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
             echo "::notice title=Build report::${body}"
           else
-            body=$( { grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log || true; } | tail -n 150 | encode)
+            # Compiler errors first (each with its location), then the end of the log.
+            errors=$( { grep -E -A 2 "^error(\[E[0-9]+\])?:" build.log || true; } | grep -v -E "^\s*\|\s*$" | head -n 120)
+            rest=$( { grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log || true; } | tail -n 40)
+            body=$(printf '%s\n----\n%s\n' "$errors" "$rest" | encode)
             echo "::error title=Build failed::${body}"
           fi

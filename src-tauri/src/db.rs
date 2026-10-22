@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::library::{FamilyApp, OwnedProfileItem};
 use crate::catalog::points::PointsItem;
@@ -682,13 +682,14 @@ pub fn import_summary(c: &Connection, scanned_at: i64, summary: &str) -> rusqlit
 
 // ---- What the interface shows -------------------------------------------------
 
-#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct KindCount {
     pub label: String,
     pub count: u64,
 }
 
-#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct CatalogCounts {
     pub games_listed: u64,
     pub games_owned: u64,
