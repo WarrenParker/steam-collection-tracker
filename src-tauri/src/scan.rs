@@ -683,7 +683,7 @@ async fn catalog_stages(
     }
 
     // Stage 3: the Points Shop, and which apps are sale events.
-    let eligible_read = db
+    let eligible_read = data
         .read(|c| db::get_meta(c, META_ELIGIBLE_READ))?
         .and_then(|v| v.parse::<i64>().ok());
     if eligible_read.is_none_or(|t| db::now() - t > POINTS_STALE_DAYS * DAY) {
@@ -731,12 +731,12 @@ async fn catalog_stages(
     // Stage 4: each game's item catalog.
     let mut slow =
         data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref() == Some(Route::CARD_PAGES);
-    let targets: Vec<CatalogTarget> = db
+    let targets: Vec<CatalogTarget> = data
         .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY))?
         .into_iter()
         .filter(|t| t.wanted(!slow))
         .collect();
-    let first_catalog = db
+    let first_catalog = data
         .read(|c| db::catalog_counts(c, family_on))?
         .games_cataloged
         == 0;

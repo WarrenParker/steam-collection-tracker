@@ -371,7 +371,6 @@ pub async fn run(
     let t = run.start("inventory");
     let mut attempts = Map::new();
     let mut inventory_apps: Vec<u64> = Vec::new();
-    let mut inventory_total: Option<u64> = None;
     let mut read_by: Option<(&str, inventory::Tally, inventory::PageInfo)> = None;
     let mut last_status: Option<(u16, bool)> = None;
     if let Some(tok) = token.as_deref() {
@@ -417,7 +416,6 @@ pub async fn run(
     }
     match read_by {
         Some((name, tally, info)) => {
-            inventory_total = info.total;
             inventory_apps = tally.apps.iter().copied().collect();
             let samples: Map<String, Value> = tally
                 .samples
