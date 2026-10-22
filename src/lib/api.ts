@@ -20,6 +20,7 @@ export interface SettingsView {
   api_key_hint: string | null;
   signed_in: boolean;
   include_family: boolean;
+  keep_card_set: boolean;
 }
 
 export interface AppInfo {
@@ -124,6 +125,87 @@ export interface GameRow {
   playtime_minutes: number;
   ach_unlocked: number | null;
   ach_total: number | null;
+  percent: number | null;
+  complete_items: number;
+  counted_items: number;
+  cards_complete: boolean;
+}
+
+export type Availability = 'available' | 'limited' | 'unobtainable';
+
+export type Group = 'cards' | 'foil_cards' | 'emoticons' | 'backgrounds' | 'points_shop' | 'boosters';
+
+export interface ItemView {
+  key: string;
+  appid: number;
+  class: number;
+  item_type: number | null;
+  foil: boolean;
+  group: Group;
+  kind: string;
+  name: string;
+  image: string | null;
+  held: number;
+  have: number;
+  needed: number;
+  progress: number;
+  counted: boolean;
+  points_cost: number | null;
+  marketable: boolean;
+  availability: Availability;
+  auto_availability: Availability;
+  note: string | null;
+  overridden: boolean;
+  tags: string[];
+}
+
+export interface GroupProgress {
+  group: Group;
+  label: string;
+  owned: number;
+  complete: number;
+  total: number;
+}
+
+export interface GameCompletion {
+  appid: number;
+  percent: number | null;
+  owned: number;
+  complete: number;
+  total: number;
+  groups: GroupProgress[];
+  unobtainable: number;
+  unobtainable_owned: number;
+  limited: number;
+  badge_level: number;
+  foil_badge: boolean;
+  has_cards: boolean;
+  cards_complete: boolean;
+  counts_for_account: boolean;
+}
+
+export interface AccountCompletion {
+  percent: number | null;
+  owned: number;
+  complete: number;
+  total: number;
+  game_average: number | null;
+  games: number;
+  games_started: number;
+  games_complete: number;
+  card_games: number;
+  card_sets_complete: number;
+  groups: GroupProgress[];
+  unobtainable: number;
+  unobtainable_owned: number;
+  limited: number;
+  keep_card_set: boolean;
+  include_family: boolean;
+}
+
+export interface GameDetail {
+  completion: GameCompletion | null;
+  items: ItemView[];
 }
 
 export type StepStatus = 'pending' | 'running' | 'ok' | 'warn' | 'fail' | 'skipped';
@@ -180,8 +262,12 @@ export const api = {
   reportBrowserAgent: (agent: string) => invoke<void>('report_browser_agent', { agent }),
   appInfo: () => invoke<AppInfo>('get_app_info'),
   settings: () => invoke<SettingsView>('get_settings'),
-  updatePreferences: (patch: { theme?: Theme; auto_update?: boolean; include_family?: boolean }) =>
-    invoke<SettingsView>('update_preferences', { patch }),
+  updatePreferences: (patch: {
+    theme?: Theme;
+    auto_update?: boolean;
+    include_family?: boolean;
+    keep_card_set?: boolean;
+  }) => invoke<SettingsView>('update_preferences', { patch }),
   saveApiKey: (key: string) => invoke<SettingsView>('save_api_key', { key }),
   setProfile: (input: string) => invoke<ProfileCheck>('set_profile', { input }),
   startScan: (resume = false) => invoke<ScanStatus>('start_scan', { resume }),
@@ -189,6 +275,10 @@ export const api = {
   scanStatus: () => invoke<ScanStatus>('get_scan_status'),
   lastScan: () => invoke<ScanSummary | null>('get_last_scan'),
   games: () => invoke<GameRow[]>('get_games'),
+  completion: () => invoke<AccountCompletion>('get_completion'),
+  gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
+  setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
+    invoke<GameDetail>('set_item_availability', { appid, key, availability }),
   diagnosticsPlan: () => invoke<DiagStep[]>('get_diagnostics_plan'),
   runDiagnostics: () => invoke<DiagnosticsResult>('run_diagnostics'),
   readReport: (path: string) => invoke<string>('read_report', { path }),

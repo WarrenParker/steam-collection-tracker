@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, errorText, links, on, type GameRow, type ScanStatus } from './api';
-  import { num } from './format';
+  import { api, errorText, on, type GameRow, type ScanStatus } from './api';
+  import { num, pct } from './format';
+  import GameDetail from './GameDetail.svelte';
 
   let { steamId }: { steamId: string | null } = $props();
 
-  type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'items' | 'cards';
-  type SortKey = 'name' | 'cards' | 'items' | 'yours' | 'badge' | 'achievements';
+  type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'items' | 'cards' | 'complete';
+  type SortKey = 'name' | 'complete' | 'cards' | 'items' | 'yours' | 'badge' | 'achievements';
 
   const filters: { value: Filter; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -15,6 +16,7 @@
     { value: 'family', label: 'Family' },
     { value: 'items', label: 'With items' },
     { value: 'cards', label: 'With cards' },
+    { value: 'complete', label: 'Complete' },
   ];
 
   let games = $state<GameRow[]>([]);
@@ -24,6 +26,7 @@
   let filter = $state<Filter>('all');
   let sortKey = $state<SortKey>('name');
   let descending = $state(false);
+  let selected = $state<GameRow | null>(null);
 
   const counts = $derived({
     all: games.length,
@@ -32,6 +35,7 @@
     family: games.filter((g) => !g.owned && g.family).length,
     items: games.filter((g) => g.items > 0).length,
     cards: games.filter((g) => g.has_cards === true).length,
+    complete: games.filter((g) => g.percent === 100).length,
   });
 
   const shown = $derived.by(() => {
@@ -49,12 +53,16 @@
           return g.items > 0;
         case 'cards':
           return g.has_cards === true;
+        case 'complete':
+          return g.percent === 100;
         default:
           return true;
       }
     });
     const value = (g: GameRow): number => {
       switch (sortKey) {
+        case 'complete':
+          return g.percent ?? -1;
         case 'cards':
           return g.cards;
         case 'items':
@@ -116,9 +124,10 @@
     return descending ? 'descending' : 'ascending';
   }
 
-  function openGame(g: GameRow) {
-    const url = g.has_cards && steamId ? links.cards(steamId, g.appid) : links.store(g.appid);
-    api.openLink(url).catch(() => {});
+  // Completion changes when an item's availability is set by hand.
+  async function refresh() {
+    await load();
+    if (selected) selected = games.find((g) => g.appid === selected!.appid) ?? selected;
   }
 </script>
 
@@ -172,6 +181,14 @@
           <th aria-sort={ariaSort('name')}>
             <button onclick={() => sortBy('name')}>Game</button>
           </th>
+          <th class="num complete-col" aria-sort={ariaSort('complete')}>
+            <button
+              onclick={() => sortBy('complete')}
+              title="How much of the game's collection you have. Items that can't be had any more aren't counted."
+            >
+              Complete
+            </button>
+          </th>
           <th class="num" aria-sort={ariaSort('cards')}>
             <button onclick={() => sortBy('cards')}>Cards</button>
           </th>
@@ -193,10 +210,18 @@
         {#each shown as g (g.appid)}
           <tr>
             <td>
-              <button class="game-name" onclick={() => openGame(g)} title="Open on Steam">{g.name}</button>
+              <button class="game-name" onclick={() => (selected = g)} title="Show this game's items">{g.name}</button>
               {#if !g.owned && g.family}<span class="tag">Family</span>{/if}
               {#if !g.owned && !g.family}<span class="tag">{g.event ? 'Event' : 'Unowned'}</span>{/if}
               {#if g.has_cards && !g.cataloged}<span class="tag quiet" title="Its item list is read in the next scan">Not scanned</span>{/if}
+            </td>
+            <td class="num complete-col">
+              {#if g.percent !== null}
+                <span class="complete-cell" class:full={g.percent === 100}>
+                  <span class="bar"><span style:width="{g.percent}%"></span></span>
+                  <span class="complete-n">{pct(g.percent)}</span>
+                </span>
+              {/if}
             </td>
             <td class="num">{g.cards ? num(g.cards) : g.has_cards === false ? '–' : ''}</td>
             <td class="num">{g.items ? num(g.items) : ''}</td>
@@ -219,3 +244,7 @@
     {/if}
   {/if}
 </div>
+
+{#if selected}
+  <GameDetail game={selected} {steamId} onclose={() => (selected = null)} onchange={refresh} />
+{/if}

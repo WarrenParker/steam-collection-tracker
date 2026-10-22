@@ -5,12 +5,13 @@
     errorText,
     links,
     on,
+    type AccountCompletion,
     type ProfileView,
     type ScanStatus,
     type ScanSummary,
     type SettingsView,
   } from './api';
-  import { ago, clock, duration, num, roughly } from './format';
+  import { ago, clock, duration, num, owned, pct, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
@@ -18,16 +19,19 @@
   let {
     signedIn,
     includeFamily,
+    keepCardSet,
     onprofile,
     onsettings,
   }: {
     signedIn: boolean;
     includeFamily: boolean;
+    keepCardSet: boolean;
     onprofile: (p: ProfileView) => void;
     onsettings: (s: SettingsView) => void;
   } = $props();
 
   let scan = $state<ScanSummary | null>(null);
+  let completion = $state<AccountCompletion | null>(null);
   let status = $state<ScanStatus | null>(null);
   let loaded = $state(false);
   let error = $state('');
@@ -75,6 +79,20 @@
   const maxType = $derived(scan ? Math.max(1, ...scan.by_type.map((t) => t.count)) : 1);
   const maxKind = $derived(catalog ? Math.max(1, ...catalog.by_kind.map((k) => k.count)) : 1);
 
+  function loadCompletion() {
+    api
+      .completion()
+      .then((c) => (completion = c))
+      .catch(() => {});
+  }
+
+  // The settings that change what counts.
+  $effect(() => {
+    void includeFamily;
+    void keepCardSet;
+    loadCompletion();
+  });
+
   onMount(() => {
     const unlisteners: Array<() => void> = [];
     Promise.all([api.lastScan(), api.scanStatus()])
@@ -88,6 +106,7 @@
     on<ScanSummary>('scan-summary', (s) => {
       scan = s;
       onprofile(s.profile);
+      loadCompletion();
     }).then((u) => unlisteners.push(u));
     const timer = setInterval(() => (now = Date.now()), 60_000);
     return () => {
@@ -252,6 +271,65 @@
       </div>
     </div>
 
+    {#if completion && completion.total > 0}
+      <section class="block collection">
+        <div class="split">
+          <section>
+            <h2>Your collection</h2>
+            <div class="collection-head">
+              <div class="collection-percent" class:foil={completion.percent === 100}>{pct(completion.percent)}</div>
+              <p class="section-note">
+                {num(completion.complete)} of {num(completion.total)} items complete, across the games you own{completion.include_family
+                  ? ' and your Steam Family shares'
+                  : ''}. Cards count by badge level and the copies you hold.
+              </p>
+            </div>
+            <ul class="typelist">
+              {#each completion.groups as g (g.group)}
+                <li>
+                  <span class="type-name">{g.label}{#if g.group === 'boosters'}<span class="muted"> · not counted</span>{/if}</span>
+                  <span class="bar"><span style:width="{g.total ? (g.owned / g.total) * 100 : 0}%"></span></span>
+                  <span class="n" title="{owned(g.owned)} of {num(g.total)}">{pct(g.total ? Math.round((1000 * g.owned) / g.total) / 10 : null)}</span>
+                </li>
+              {/each}
+            </ul>
+          </section>
+
+          <section>
+            <h2>Completion</h2>
+            <dl class="facts">
+              <dt title="Every item weighs the same">Items complete</dt>
+              <dd>{pct(completion.percent)}</dd>
+              <dt title="Every game weighs the same: the average of each game's percentage">Average game</dt>
+              <dd>{pct(completion.game_average)}</dd>
+              <dt>Games started</dt>
+              <dd>{num(completion.games_started)} of {num(completion.games)}</dd>
+              <dt>Games complete</dt>
+              <dd>{num(completion.games_complete)} of {num(completion.games)}</dd>
+              {#if completion.card_games > 0}
+                <dt title="Level 5 badge and the foil badge">Card sets complete</dt>
+                <dd>{num(completion.card_sets_complete)} of {num(completion.card_games)}</dd>
+              {/if}
+              {#if completion.limited > 0}
+                <dt title="Items that are only around for a while, or handed out at sales and events">
+                  Limited or event items <span class="tag">Limited/Event</span>
+                </dt>
+                <dd>{num(completion.limited)}</dd>
+              {/if}
+              {#if completion.unobtainable > 0}
+                <dt title="Items that can't be had any more. They're listed but left out of the percentage.">
+                  Can't be had any more <span class="tag">Unobtainable</span>
+                </dt>
+                <dd>{num(completion.unobtainable)}{completion.unobtainable_owned
+                    ? `, ${num(completion.unobtainable_owned)} owned`
+                    : ''}</dd>
+              {/if}
+            </dl>
+          </section>
+        </div>
+      </section>
+    {/if}
+
     {#if catalog}
       <section class="block">
         <div class="split">
@@ -369,6 +447,6 @@
   <Diagnostics />
 
   <p class="phase-note">
-    This is an early version. Completion percentages and prices arrive in the next versions.
+    This is an early version. Prices, account value and cost to complete arrive in the next version.
   </p>
 </div>

@@ -123,12 +123,13 @@
           <Overview
             signedIn={settings.signed_in}
             includeFamily={settings.include_family}
+            keepCardSet={settings.keep_card_set}
             onprofile={profileChanged}
             onsettings={(s) => (settings = s)}
           />
         </div>
         {#if view === 'games'}
-          {#key settings.include_family}
+          {#key `${settings.include_family}-${settings.keep_card_set}`}
             <Games steamId={settings.profile?.steam_id ?? null} />
           {/key}
         {/if}

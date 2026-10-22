@@ -18,7 +18,7 @@ use crate::steam::inventory::InvRow;
 use crate::steam::{Badge, OwnedGame};
 
 pub const FILE_NAME: &str = "collection.db";
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// The app's own "game" for Steam-wide items such as gems.
 pub const STEAM_APP: i64 = 753;
@@ -140,6 +140,22 @@ PRAGMA user_version = 2;
 COMMIT;
 ";
 
+/// 0.5.0: Points Shop items record whether they can be bought on their own,
+/// so every game's Points Shop is read again. Users can set an item's
+/// availability themselves.
+const MIGRATE_V3: &str = "
+BEGIN;
+ALTER TABLE items ADD COLUMN points_buyable INTEGER;
+CREATE TABLE item_overrides (
+    key          TEXT PRIMARY KEY,
+    availability TEXT NOT NULL,
+    set_at       INTEGER NOT NULL
+) WITHOUT ROWID;
+UPDATE apps SET points_checked_at = NULL;
+PRAGMA user_version = 3;
+COMMIT;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -172,6 +188,8 @@ impl Db {
         let conn = Connection::open_in_memory().expect("an in-memory database always opens");
         conn.execute_batch(SCHEMA_V1).expect("the schema is valid");
         conn.execute_batch(MIGRATE_V2)
+            .expect("the migration is valid");
+        conn.execute_batch(MIGRATE_V3)
             .expect("the migration is valid");
         Self {
             conn: Mutex::new(conn),
@@ -210,6 +228,9 @@ fn try_open(path: &Path) -> Result<Connection, String> {
     }
     if version < 2 {
         conn.execute_batch(MIGRATE_V2).map_err(|e| e.to_string())?;
+    }
+    if version < 3 {
+        conn.execute_batch(MIGRATE_V3).map_err(|e| e.to_string())?;
     }
     Ok(conn)
 }
@@ -428,7 +449,7 @@ pub fn save_points(c: &Connection, appids: &[u64], items: &[PointsItem]) -> rusq
     let t = now();
     let mut clear = c.prepare(
         "UPDATE items SET in_points = 0, points_defid = NULL, points_cost = NULL,
-             points_active = NULL, points_from = NULL, points_until = NULL
+             points_active = NULL, points_from = NULL, points_until = NULL, points_buyable = NULL
          WHERE appid = ?1",
     )?;
     for appid in appids {
@@ -436,10 +457,12 @@ pub fn save_points(c: &Connection, appids: &[u64], items: &[PointsItem]) -> rusq
     }
     let mut st = c.prepare(
         "INSERT INTO items (appid, class, item_type, foil, name, title, description, image, image_large,
-             animated, in_points, points_defid, points_cost, points_active, points_from, points_until, updated_at)
-         VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13, ?14, ?15)
+             animated, in_points, points_defid, points_cost, points_active, points_from, points_until,
+             points_buyable, updated_at)
+         VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13, ?14, ?16, ?15)
          ON CONFLICT (appid, class, item_type, foil) DO UPDATE SET
              in_points = 1,
+             points_buyable = excluded.points_buyable,
              points_defid = excluded.points_defid,
              points_cost = excluded.points_cost,
              points_active = excluded.points_active,
@@ -471,6 +494,7 @@ pub fn save_points(c: &Connection, appids: &[u64], items: &[PointsItem]) -> rusq
             p.available_from,
             p.available_until,
             t,
+            p.buyable,
         ])?;
     }
     let mut tidy =
@@ -491,6 +515,18 @@ pub fn save_event_apps(c: &Connection, apps: &[(u64, bool)]) -> rusqlite::Result
         if *event {
             st.execute([*appid as i64])?;
         }
+    }
+    Ok(())
+}
+
+/// Games whose Points Shop is read again on this scan, unless it was read
+/// after `before`: used for games where the user owns an item no list has.
+pub fn expire_points(c: &Connection, appids: &[u64], before: i64) -> rusqlite::Result<()> {
+    let mut st = c.prepare(
+        "UPDATE apps SET points_checked_at = NULL WHERE appid = ?1 AND points_checked_at < ?2",
+    )?;
+    for appid in appids {
+        st.execute(params![*appid as i64, before])?;
     }
     Ok(())
 }
@@ -894,6 +930,11 @@ pub struct GameRow {
     pub playtime_minutes: u64,
     pub ach_unlocked: Option<u64>,
     pub ach_total: Option<u64>,
+    /// Completion, filled in from the completion figures.
+    pub percent: Option<f64>,
+    pub complete_items: u64,
+    pub counted_items: u64,
+    pub cards_complete: bool,
 }
 
 pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
@@ -932,6 +973,10 @@ pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
             foil_badge: r.get::<_, i64>(13)? != 0,
             ach_unlocked: r.get::<_, Option<i64>>(14)?.map(|v| v.max(0) as u64),
             ach_total: r.get::<_, Option<i64>>(15)?.map(|v| v.max(0) as u64),
+            percent: None,
+            complete_items: 0,
+            counted_items: 0,
+            cards_complete: false,
         })
     })?;
     rows.collect()
@@ -1077,6 +1122,7 @@ mod tests {
             active: Some(true),
             available_from: None,
             available_until: None,
+            buyable: Some(1),
             item: CatalogItem {
                 class: class::EMOTICON,
                 item_type: 9,

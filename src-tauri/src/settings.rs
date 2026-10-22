@@ -44,6 +44,8 @@ pub struct Settings {
     pub signed_in_steam_id: Option<String>,
     /// List and catalog games shared through the user's Steam Family.
     pub include_family: bool,
+    /// Cards also need a copy held in the inventory on top of the badge.
+    pub keep_card_set: bool,
 }
 
 impl Default for Settings {
@@ -57,6 +59,7 @@ impl Default for Settings {
             api_key_hint: None,
             signed_in_steam_id: None,
             include_family: false,
+            keep_card_set: false,
         }
     }
 }
@@ -72,6 +75,7 @@ pub struct SettingsView {
     pub api_key_hint: Option<String>,
     pub signed_in: bool,
     pub include_family: bool,
+    pub keep_card_set: bool,
 }
 
 impl Settings {
@@ -134,6 +138,7 @@ impl Settings {
             api_key_hint: self.api_key_hint.clone(),
             signed_in: self.signed_in_steam_id.is_some(),
             include_family: self.include_family,
+            keep_card_set: self.keep_card_set,
         }
     }
 }
@@ -149,6 +154,7 @@ mod tests {
         assert!(s.auto_update);
         assert_eq!(s.currency, "USD");
         assert!(!s.include_family);
+        assert!(!s.keep_card_set);
     }
 
     #[test]

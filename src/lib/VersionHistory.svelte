@@ -10,16 +10,23 @@
   let confirming = $state<string | null>(null);
   let installing = $state<string | null>(null);
 
-  onMount(async () => {
+  let loadError = $state('');
+
+  onMount(load);
+
+  async function load() {
+    loading = true;
+    loadError = '';
     try {
       list = await api.versions();
       open = list.releases.find((r) => r.newer)?.version ?? list.releases.find((r) => r.current)?.version ?? null;
     } catch (e) {
-      error = errorText(e);
+      list = null;
+      loadError = errorText(e);
     } finally {
       loading = false;
     }
-  });
+  }
 
   function toggle(version: string) {
     open = open === version ? null : version;
@@ -104,7 +111,12 @@
         </li>
       {/each}
     </ul>
-  {:else if !error}
+  {:else if loadError}
+    <div class="load-failed">
+      <p class="desc">Couldn't load the list of versions. {loadError}</p>
+      <button class="btn small" onclick={load}>Try again</button>
+    </div>
+  {:else}
     <p class="desc">No versions have been published yet.</p>
   {/if}
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}

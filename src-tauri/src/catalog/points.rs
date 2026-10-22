@@ -23,6 +23,9 @@ pub struct PointsItem {
     pub available_from: Option<i64>,
     /// Unix time the item stops being available; `None` means no limit.
     pub available_until: Option<i64>,
+    /// 1 when it can be bought on its own, 2 only in a bundle, 0 neither
+    /// (sale rewards and event items). `None` when that wasn't checked.
+    pub buyable: Option<i64>,
     pub item: CatalogItem,
 }
 
@@ -33,6 +36,8 @@ pub struct PointsPage {
     pub total: Option<i64>,
     /// Definitions on the page, including bundles and others that were skipped.
     pub definitions: usize,
+    /// Items sold inside a bundle that's on sale.
+    pub bundled: Vec<i64>,
 }
 
 /// Reads one page. `None` means it wasn't a Points Shop answer.
@@ -46,9 +51,15 @@ pub fn parse_page(v: &Value) -> Option<PointsPage> {
         .map(|a| a.as_slice())
         .unwrap_or(&[]);
     let mut items = Vec::new();
+    let mut bundled = Vec::new();
     for d in list {
         // Bundles group other items, and some definitions aren't items at all.
         let is_bundle = d["bundle_defids"].as_array().is_some_and(|b| !b.is_empty());
+        if is_bundle && flag(&d["active"]) != Some(false) {
+            if let Some(ids) = d["bundle_defids"].as_array() {
+                bundled.extend(ids.iter().filter_map(int));
+            }
+        }
         let (Some(appid), Some(defid), Some(class_id), Some(item_type)) = (
             int(&d["appid"]).filter(|a| *a > 0),
             int(&d["defid"]),
@@ -71,6 +82,7 @@ pub fn parse_page(v: &Value) -> Option<PointsPage> {
             active: flag(&d["active"]),
             available_from: int(&d["timestamp_available"]).filter(|t| *t > 0),
             available_until: int(&d["timestamp_available_end"]).filter(|t| *t > 0),
+            buyable: None,
             item: CatalogItem {
                 class: class_id,
                 item_type,
@@ -91,6 +103,7 @@ pub fn parse_page(v: &Value) -> Option<PointsPage> {
         next_cursor: text(&resp["next_cursor"]),
         total: int(&resp["total_count"]),
         definitions: list.len(),
+        bundled,
     })
 }
 
@@ -141,6 +154,7 @@ mod tests {
         assert!(second.item.animated);
         assert_eq!(second.active, Some(false));
         assert_eq!(second.available_until, Some(1700600000));
+        assert_eq!(page.bundled, vec![100, 101, 1]);
     }
 
     #[test]

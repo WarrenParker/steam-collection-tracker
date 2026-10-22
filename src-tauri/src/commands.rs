@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
+use crate::completion::{self, AccountCompletion, Availability, GameCompletion, ItemView};
 use crate::db::{self, GameRow};
 use crate::diagnostics::{self, DiagStep, DiagnosticsResult};
 use crate::housekeeping;
@@ -34,6 +35,7 @@ pub struct PreferencesPatch {
     theme: Option<Theme>,
     auto_update: Option<bool>,
     include_family: Option<bool>,
+    keep_card_set: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -88,6 +90,9 @@ pub fn update_preferences(
         }
         if let Some(family) = patch.include_family {
             s.include_family = family;
+        }
+        if let Some(keep) = patch.keep_card_set {
+            s.keep_card_set = keep;
         }
         Ok(())
     })?;
@@ -169,12 +174,81 @@ pub fn get_last_scan(state: State<'_, AppState>) -> Option<ScanSummary> {
     scan::last_summary(&state)
 }
 
+fn rules(state: &AppState) -> completion::Rules {
+    let s = state.settings();
+    completion::Rules {
+        keep_card_set: s.keep_card_set,
+        include_family: s.include_family,
+    }
+}
+
 /// Every listed game: owned, unowned with items, and Steam Family games when
-/// that setting is on.
+/// that setting is on, with how complete each one is.
 #[tauri::command]
 pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
-    let family = state.settings().include_family;
-    state.db.read(|c| db::games(c, family))
+    let rules = rules(&state);
+    state.db.read(|c| {
+        let mut games = db::games(c, rules.include_family)?;
+        let snap = completion::compute(c, rules, db::now())?;
+        for g in &mut games {
+            if let Some(done) = snap.games.get(&g.appid) {
+                g.percent = done.percent;
+                g.complete_items = done.complete;
+                g.counted_items = done.total;
+                g.cards_complete = done.cards_complete;
+            }
+        }
+        Ok(games)
+    })
+}
+
+/// Completion for the whole account.
+#[tauri::command]
+pub fn get_completion(state: State<'_, AppState>) -> Result<AccountCompletion, String> {
+    let rules = rules(&state);
+    state
+        .db
+        .read(|c| completion::compute(c, rules, db::now()).map(|s| s.account))
+}
+
+#[derive(Serialize)]
+pub struct GameDetail {
+    completion: Option<GameCompletion>,
+    items: Vec<ItemView>,
+}
+
+fn game_detail(state: &AppState, appid: u64) -> Result<GameDetail, String> {
+    let rules = rules(state);
+    state.db.read(|c| {
+        let snap = completion::compute(c, rules, db::now())?;
+        Ok(GameDetail {
+            completion: snap.games.get(&appid).cloned(),
+            items: snap.game_items(appid),
+        })
+    })
+}
+
+/// One game's items, with what the user owns and each item's tags.
+#[tauri::command]
+pub fn get_game_detail(state: State<'_, AppState>, appid: u64) -> Result<GameDetail, String> {
+    game_detail(&state, appid)
+}
+
+/// Sets an item's availability by hand, or hands it back to the app with `None`.
+#[tauri::command]
+pub fn set_item_availability(
+    state: State<'_, AppState>,
+    appid: u64,
+    key: String,
+    availability: Option<Availability>,
+) -> Result<GameDetail, String> {
+    if !key.starts_with(&format!("{appid}-")) {
+        return Err("That item isn't part of this game.".to_string());
+    }
+    state
+        .db
+        .write(|tx| completion::set_override(tx, &key, availability, db::now()))?;
+    game_detail(&state, appid)
 }
 
 #[tauri::command]

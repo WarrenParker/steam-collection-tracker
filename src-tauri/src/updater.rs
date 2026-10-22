@@ -134,7 +134,7 @@ fn parse_release(v: &Value) -> Option<Release> {
     })
 }
 
-async fn github_get(http: &reqwest::Client, path: &str) -> Result<Value, String> {
+async fn github_get(http: &reqwest::Client, path: &str, not_found: &str) -> Result<Value, String> {
     let repo = REPO.ok_or_else(|| "Updates are turned off in this copy of the app.".to_string())?;
     let url = format!("https://api.github.com/repos/{repo}{path}");
     let resp = http
@@ -148,7 +148,7 @@ async fn github_get(http: &reqwest::Client, path: &str) -> Result<Value, String>
         })?;
     let status = resp.status().as_u16();
     if status == 404 {
-        return Err("No versions have been published yet.".to_string());
+        return Err(not_found.to_string());
     }
     if status == 403 || status == 429 {
         return Err("The update server is busy. Try again in a few minutes.".to_string());
@@ -164,17 +164,29 @@ async fn github_get(http: &reqwest::Client, path: &str) -> Result<Value, String>
 }
 
 async fn latest_release(http: &reqwest::Client) -> Result<Release, String> {
-    let v = github_get(http, "/releases/latest").await?;
+    let v = github_get(
+        http,
+        "/releases/latest",
+        "No versions have been published yet.",
+    )
+    .await?;
     parse_release(&v)
         .ok_or_else(|| "The newest version's information couldn't be read.".to_string())
 }
 
 async fn all_releases(http: &reqwest::Client) -> Result<Vec<Release>, String> {
-    let v = github_get(http, "/releases?per_page=50").await?;
-    let mut releases: Vec<Release> = v
-        .as_array()
-        .map(|list| list.iter().filter_map(parse_release).collect())
-        .unwrap_or_default();
+    let v = github_get(
+        http,
+        "/releases?per_page=50",
+        "GitHub couldn't find the app's releases. Try again later.",
+    )
+    .await?;
+    let unreadable = || "GitHub's list of versions couldn't be read. Try again later.".to_string();
+    let list = v.as_array().ok_or_else(unreadable)?;
+    let mut releases: Vec<Release> = list.iter().filter_map(parse_release).collect();
+    if releases.is_empty() && !list.is_empty() {
+        return Err(unreadable());
+    }
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(releases)
 }
@@ -291,11 +303,13 @@ pub async fn check(app: &AppHandle, force_download: bool) -> UpdateState {
 pub async fn versions(app: &AppHandle) -> Result<VersionList, String> {
     let state = app.state::<AppState>();
     let current = current_version();
-    let releases = if enabled() {
-        all_releases(state.steam.http()).await?
-    } else {
-        Vec::new()
-    };
+    if !enabled() {
+        return Err(
+            "Updates are turned off in this copy of the app, so there's no version list."
+                .to_string(),
+        );
+    }
+    let releases = all_releases(state.steam.http()).await?;
     Ok(VersionList {
         current: current.to_string(),
         build: build_id(),
