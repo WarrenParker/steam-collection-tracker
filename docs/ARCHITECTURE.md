@@ -13,7 +13,7 @@ A guide to the code, the data folder, and how versions get built and released.
 ```text
 .github/workflows/build.yml   Builds, tests and releases on every push to main
 CHANGELOG.md                  Every version's changes; release notes come from here
-docs/                         Roadmap, idea board, architecture, Steam data notes
+docs/                         Roadmap, ideas, architecture, Steam data notes
 index.html, src/              The interface
   App.svelte                  Top bar, setup vs overview, settings drawer
   app.css                     Design tokens and themes (greyscale, dark, light)
@@ -80,6 +80,7 @@ The sign-in cookies are kept.
 ## Versions, builds and updates
 
 - **Semantic versioning** (MAJOR.MINOR.PATCH). The version is set in `src-tauri/Cargo.toml` and `package.json`, and every version has a section in `CHANGELOG.md`.
+- **To release a version:** set the new version in `src-tauri/Cargo.toml` and `package.json`, add a section for it at the top of `CHANGELOG.md`, and push to `main`.
 - **Every push to `main`** runs `.github/workflows/build.yml` on a Windows runner: interface build, `cargo test`, `tauri build`, then packaging.
   - The build posts a short report (test results, warnings, size) as a check annotation, or the tail of the log if it fails. These can be read through the GitHub API.
   - Pushes that only change `docs/` or `README.md` don't trigger a build.

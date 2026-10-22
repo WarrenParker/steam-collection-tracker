@@ -1,18 +1,6 @@
-```text
-  ╔═══╗   ╔═══╗   ╔═══╗   ╔═══╗
-  ║ 0 ╟───╢ 1 ╟───╢ 2 ╟───╢ 3 ║      STEAM COLLECTION TRACKER
-  ╚═══╝   ╚═══╝   ╚═══╝   ╚═╤═╝
-                            │       Roadmap
-  ╔═════╗ ╔═══╗   ╔═══╗   ╔═╧═╗
-  ║ 1.0 ╟─╢ 6 ╟───╢ 5 ╟───╢ 4 ║
-  ╚═════╝ ╚═══╝   ╚═══╝   ╚═══╝
-```
-
 # Roadmap
 
-The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't planned yet live on the [idea board](IDEAS.md). There's also a [styled version of this roadmap](https://claude.ai/artifact/QfRF2gnweMCMUFVmAAKgpf) that matches the app.
-
-Each phase is worked on in its own chat in the Steam Collection Tracker project.
+The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
 **Now:** version 0.2.0. Phase 0 is done; Phase 1 is next.
 
@@ -73,7 +61,7 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 
 ## Decisions
 
-- **Own profile only.** Each person loads their own profile and shares a banner image. Comparing profiles and leaderboards are on the idea board.
+- **Own profile only.** Each person loads their own profile and shares a banner image. Comparing profiles and leaderboards are listed in [IDEAS.md](IDEAS.md).
 - **Tauri.** A Rust engine with screens drawn by the Edge engine built into Windows. It opens in its own window, never a browser, and the exe is around 7 MB.
 - **Portable.** A `data` folder next to the exe holds settings, cache and reports. Every setting is changed inside the app.
 - **Updates from GitHub Releases.** Versions follow semantic versioning, and each release's notes come from the changelog. Any version can be installed from the app.
