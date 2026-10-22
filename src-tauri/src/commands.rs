@@ -5,10 +5,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
+use crate::db::{self, GameRow};
 use crate::diagnostics::{self, DiagStep, DiagnosticsResult};
 use crate::housekeeping;
 use crate::profile_input::{self, ProfileRef};
-use crate::scan::{self, ScanProgress, ScanSummary, PRIVATE_GAMES, PRIVATE_PROFILE};
+use crate::scan::{self, ScanStatus, ScanSummary, PRIVATE_GAMES, PRIVATE_PROFILE};
 use crate::session;
 use crate::settings::{SettingsView, Theme};
 use crate::state::AppState;
@@ -16,6 +17,7 @@ use crate::steam::ProfileView;
 use crate::updater::{self, UpdateState, VersionList};
 
 const BUSY: &str = "The app is already talking to Steam. Wait for that to finish, then try again.";
+const SCANNING: &str = "A scan is running. Pause it first, then run the test.";
 
 #[derive(Serialize)]
 pub struct AppInfo {
@@ -31,6 +33,7 @@ pub struct AppInfo {
 pub struct PreferencesPatch {
     theme: Option<Theme>,
     auto_update: Option<bool>,
+    include_family: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -76,6 +79,9 @@ pub fn update_preferences(
         }
         if let Some(auto) = patch.auto_update {
             s.auto_update = auto;
+        }
+        if let Some(family) = patch.include_family {
+            s.include_family = family;
         }
         Ok(())
     })?;
@@ -135,23 +141,34 @@ pub async fn set_profile(
     })
 }
 
+/// Starts a scan, or continues a paused one. Returns right away; progress
+/// arrives as `scan-status` events.
 #[tauri::command]
-pub async fn run_scan(app: AppHandle, state: State<'_, AppState>) -> Result<ScanSummary, String> {
-    let _busy = state.try_begin().ok_or_else(|| BUSY.to_string())?;
-    let note_app = app.clone();
-    let notify = move |message: String| {
-        let _ = note_app.emit("scan-note", message);
-    };
-    let progress_app = app.clone();
-    let progress = move |p: ScanProgress| {
-        let _ = progress_app.emit("scan-progress", p);
-    };
-    scan::run(&app, &notify, &progress).await
+pub fn start_scan(app: AppHandle, resume: Option<bool>) -> ScanStatus {
+    scan::start(&app, resume.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn pause_scan(app: AppHandle) -> ScanStatus {
+    scan::pause(&app)
+}
+
+#[tauri::command]
+pub fn get_scan_status(app: AppHandle) -> ScanStatus {
+    scan::status(&app)
 }
 
 #[tauri::command]
 pub fn get_last_scan(state: State<'_, AppState>) -> Option<ScanSummary> {
-    scan::load_last(&state.paths)
+    scan::last_summary(&state)
+}
+
+/// Every listed game: owned, unowned with items, and Steam Family games when
+/// that setting is on.
+#[tauri::command]
+pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
+    let family = state.settings().include_family;
+    state.db.read(|c| db::games(c, family))
 }
 
 #[tauri::command]
@@ -164,6 +181,9 @@ pub async fn run_diagnostics(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiagnosticsResult, String> {
+    if state.scan.is_running() {
+        return Err(SCANNING.to_string());
+    }
     let _busy = state.try_begin().ok_or_else(|| BUSY.to_string())?;
     let note_app = app.clone();
     let notify = move |message: String| {

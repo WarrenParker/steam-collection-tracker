@@ -111,6 +111,30 @@ pub struct Badge {
     pub appid: Option<u64>,
     pub level: u64,
     pub foil: bool,
+    pub xp: Option<i64>,
+    /// Unix time the badge was crafted or earned.
+    pub completion_time: Option<i64>,
+}
+
+/// How a Web API call identifies itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Auth<'a> {
+    /// No key or token: public calls.
+    None,
+    /// The user's Web API key.
+    Key(&'a str),
+    /// The signed-in user's token.
+    Token(&'a str),
+}
+
+impl Auth<'_> {
+    pub fn name(self) -> &'static str {
+        match self {
+            Auth::None => "none",
+            Auth::Key(_) => "key",
+            Auth::Token(_) => "token",
+        }
+    }
 }
 
 pub struct SteamClient {
@@ -387,6 +411,150 @@ impl SteamClient {
     }
 }
 
+impl SteamClient {
+    /// Every community item a game has: cards with their foil art, emoticons,
+    /// backgrounds, badges and Points Shop items.
+    pub async fn item_definitions(
+        &self,
+        appid: u64,
+        auth: Auth<'_>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let app = appid.to_string();
+        let mut params = vec![("appid", app.as_str()), ("language", "english")];
+        match auth {
+            Auth::None => {}
+            Auth::Key(k) => params.push(("key", k)),
+            Auth::Token(t) => params.push(("access_token", t)),
+        }
+        let url = webapi_url("/IQuestService/GetCommunityItemDefinitions/v1/", &params);
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// Store details for a batch of games, including whether each has trading cards.
+    pub async fn store_items(
+        &self,
+        appids: &[u64],
+        key: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let input = crate::catalog::store::request_json(appids);
+        let mut params = vec![("input_json", input.as_str())];
+        if let Some(k) = key {
+            params.push(("key", k));
+        }
+        let url = webapi_url("/IStoreBrowseService/GetItems/v1/", &params);
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// One page of the Points Shop items for a batch of games.
+    pub async fn reward_items(
+        &self,
+        appids: &[u64],
+        cursor: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let ids: Vec<(String, String)> = appids
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (format!("appids[{i}]"), a.to_string()))
+            .collect();
+        let count = crate::catalog::points::PAGE_SIZE.to_string();
+        let mut params: Vec<(&str, &str)> =
+            ids.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        params.push(("count", count.as_str()));
+        params.push(("language", "english"));
+        if let Some(c) = cursor {
+            params.push(("cursor", c));
+        }
+        let url = webapi_url("/ILoyaltyRewardsService/QueryRewardItems/v1/", &params);
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// Every game with a Points Shop page, flagging Steam sale events.
+    pub async fn eligible_apps(&self, notify: Notify<'_>) -> Result<Fetched, String> {
+        let url = webapi_url("/ILoyaltyRewardsService/GetEligibleApps/v1/", &[]);
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// Every emoticon the signed-in user can use.
+    pub async fn emoticons(&self, token: &str, notify: Notify<'_>) -> Result<Fetched, String> {
+        let url = webapi_url(
+            "/IPlayerService/GetEmoticonList/v1/",
+            &[("access_token", token)],
+        );
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// The signed-in user's profile items: backgrounds, frames, avatars and so on.
+    pub async fn profile_items_owned(
+        &self,
+        token: &str,
+        steam_id: &str,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = webapi_url(
+            "/IPlayerService/GetProfileItemsOwned/v1/",
+            &[
+                ("access_token", token),
+                ("steamid", steam_id),
+                ("language", "english"),
+            ],
+        );
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    pub async fn family_group(
+        &self,
+        token: &str,
+        steam_id: &str,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = webapi_url(
+            "/IFamilyGroupsService/GetFamilyGroupForUser/v1/",
+            &[("access_token", token), ("steamid", steam_id)],
+        );
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// Games other family members share, without the user's own.
+    pub async fn family_library(
+        &self,
+        token: &str,
+        group_id: &str,
+        steam_id: &str,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = webapi_url(
+            "/IFamilyGroupsService/GetSharedLibraryApps/v1/",
+            &[
+                ("access_token", token),
+                ("family_groupid", group_id),
+                ("steamid", steam_id),
+                ("include_own", "false"),
+                ("include_excluded", "false"),
+                ("include_free", "false"),
+                ("language", "english"),
+            ],
+        );
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+
+    /// A game's card page, read without sign-in.
+    pub async fn card_page(
+        &self,
+        steam_id: &str,
+        appid: u64,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = community_url(
+            &format!("/profiles/{steam_id}/gamecards/{appid}/"),
+            &[("l", "english")],
+        );
+        self.fetch(Bucket::Community, &url, None, notify).await
+    }
+}
+
 pub fn store_url(path: &str, params: &[(&str, &str)]) -> Url {
     build_url(STORE, path, params)
 }
@@ -494,6 +662,8 @@ pub fn parse_badges(v: &Value) -> Badges {
                     appid: b["appid"].as_u64(),
                     level: b["level"].as_u64().unwrap_or(0),
                     foil: b["border_color"].as_u64() == Some(1),
+                    xp: b["xp"].as_i64(),
+                    completion_time: b["completion_time"].as_i64(),
                 })
                 .collect()
         })

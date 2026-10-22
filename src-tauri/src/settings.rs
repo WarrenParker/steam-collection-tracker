@@ -42,6 +42,8 @@ pub struct Settings {
     /// The account the user signed in to Steam with, if they did. The sign-in
     /// cookies themselves stay in the WebView's encrypted cookie store.
     pub signed_in_steam_id: Option<String>,
+    /// List and catalog games shared through the user's Steam Family.
+    pub include_family: bool,
 }
 
 impl Default for Settings {
@@ -54,6 +56,7 @@ impl Default for Settings {
             api_key_protected: None,
             api_key_hint: None,
             signed_in_steam_id: None,
+            include_family: false,
         }
     }
 }
@@ -68,6 +71,7 @@ pub struct SettingsView {
     pub has_api_key: bool,
     pub api_key_hint: Option<String>,
     pub signed_in: bool,
+    pub include_family: bool,
 }
 
 impl Settings {
@@ -129,6 +133,7 @@ impl Settings {
             has_api_key: matches!(self.api_key(), Ok(Some(_))),
             api_key_hint: self.api_key_hint.clone(),
             signed_in: self.signed_in_steam_id.is_some(),
+            include_family: self.include_family,
         }
     }
 }
@@ -143,6 +148,7 @@ mod tests {
         assert_eq!(s.theme, Theme::Light);
         assert!(s.auto_update);
         assert_eq!(s.currency, "USD");
+        assert!(!s.include_family);
     }
 
     #[test]

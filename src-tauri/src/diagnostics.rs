@@ -14,12 +14,14 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager};
 
+use crate::catalog::{cardpage, defs, kind_label, library, points, store, CatalogItem};
 use crate::housekeeping;
+use crate::jsonutil::int;
 use crate::session::{self, Session};
 use crate::state::AppState;
 use crate::steam::{
     community_url, inventory, parse_badges, parse_owned_games, parse_player_summary, webapi_url,
-    Bucket, Fetched, Notify, BLOCK_MINUTES,
+    Auth, Bucket, Fetched, Notify, BLOCK_MINUTES,
 };
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,11 +71,14 @@ const PLAN: &[(&str, &str)] = &[
     ("owned_games", "Owned games"),
     ("badges", "Badges"),
     ("inventory", "Inventory"),
-    ("card_page", "A game's card set page"),
     ("market_search", "Market items for one game"),
     ("price_history", "Price history for one item"),
-    ("points_catalog", "Points Shop items for one game"),
+    ("item_defs", "Steam's item list for one game"),
+    ("store_cards", "Which games have trading cards"),
+    ("card_page", "A game's card set page"),
+    ("points_catalog", "Points Shop items for a few games"),
     ("points_owned", "Points Shop items you own"),
+    ("emoticons", "Emoticons you own"),
     ("family", "Steam Family library"),
     ("badge_page", "Badges page"),
 ];
@@ -288,10 +293,12 @@ pub async fn run(
         ],
     );
     let mut owned_count = 0usize;
+    let mut owned_apps: Vec<u64> = Vec::new();
     match steam.fetch(Bucket::WebApi, &url, None, notify).await {
         Ok(f) => {
             let owned = parse_owned_games(&f.json().unwrap_or(Value::Null));
             owned_count = owned.games.len();
+            owned_apps = owned.games.iter().map(|g| g.appid).collect();
             let (status, text) = if !f.is_success() {
                 (
                     StepStatus::Fail,
@@ -412,6 +419,12 @@ pub async fn run(
         Some((name, tally, info)) => {
             inventory_total = info.total;
             inventory_apps = tally.apps.iter().copied().collect();
+            let samples: Map<String, Value> = tally
+                .samples
+                .iter()
+                .map(|(class_id, d)| (format!("item_class_{class_id}"), shape(d, 4)))
+                .collect();
+            attempts.insert("item_samples".into(), Value::Object(samples));
             let types: Vec<String> = tally
                 .by_type
                 .iter()
@@ -466,57 +479,8 @@ pub async fn run(
     run.details
         .insert("sample_app".to_string(), json!(sample_app));
 
-    // 6. The game's card page
-    let t = run.start("card_page");
-    let url = community_url(
-        &format!("/profiles/{sid}/gamecards/{sample_app}/"),
-        &[("l", "english")],
-    );
-    match steam.fetch(Bucket::Community, &url, None, notify).await {
-        Ok(f) if f.skipped => run.finish(
-            "card_page",
-            t,
-            StepStatus::Skipped,
-            skipped_text(),
-            Value::Null,
-        ),
-        Ok(f) => {
-            let cards = count_regex(&f.body, r#"class="badge_card_set_card[ "]"#);
-            let detail = html_detail(
-                &f,
-                &[
-                    "badge_card_set_card",
-                    "badge_card_set_text_cardname",
-                    "badge_card_set_text_qty",
-                    "badge_card_set_title",
-                    "gamecard_badge_progress",
-                    "badge_title_stats_drops",
-                    "badge_info_title",
-                    "badge_current",
-                ],
-            );
-            let (status, text) = if !f.is_success() {
-                (
-                    StepStatus::Fail,
-                    format!("Steam answered with code {}.", f.status),
-                )
-            } else if cards > 0 {
-                (
-                    StepStatus::Ok,
-                    format!("Found {cards} cards in the set for app {sample_app}."),
-                )
-            } else {
-                (
-                    StepStatus::Warn,
-                    format!("The page loaded, but no cards were found for app {sample_app}."),
-                )
-            };
-            run.finish("card_page", t, status, text, detail);
-        }
-        Err(e) => run.finish("card_page", t, StepStatus::Fail, e, Value::Null),
-    }
-
-    // 7. Every market item for the game, in one request
+    // 6. Every market item for the game, in one request. This goes first among
+    // the per-game checks: whether the market answers again is the open question.
     let t = run.start("market_search");
     let game_tag = format!("tag_app_{sample_app}");
     let url = community_url(
@@ -617,7 +581,7 @@ pub async fn run(
         Err(e) => run.finish("market_search", t, StepStatus::Fail, e, Value::Null),
     }
 
-    // 8. Price history: the price history API when signed in, otherwise the
+    // 7. Price history: the price history API when signed in, otherwise the
     // graph data embedded in the item's market page.
     let t = run.start("price_history");
     match sample_hash.as_deref() {
@@ -743,45 +707,340 @@ pub async fn run(
         }
     }
 
-    // 9. Points Shop catalog for the game
-    let t = run.start("points_catalog");
-    let app_text = sample_app.to_string();
-    let url = webapi_url(
-        "/ILoyaltyRewardsService/QueryRewardItems/v1/",
-        &[
-            ("appids[0]", app_text.as_str()),
-            ("count", "100"),
-            ("language", "english"),
-        ],
-    );
-    match steam.fetch(Bucket::WebApi, &url, None, notify).await {
-        Ok(f) => {
-            let count = f
-                .json()
-                .and_then(|v| v["response"]["definitions"].as_array().map(|a| a.len()));
-            let (status, text) = match count {
-                Some(n) if n > 0 => (
-                    StepStatus::Ok,
-                    format!("Found {n} Points Shop items for app {sample_app}."),
-                ),
-                Some(_) => (
-                    StepStatus::Warn,
-                    format!("The Points Shop lists no items for app {sample_app}."),
-                ),
-                None => (
-                    StepStatus::Fail,
-                    format!(
-                        "The Points Shop catalog couldn't be read (code {}).",
-                        f.status
-                    ),
-                ),
-            };
-            run.finish("points_catalog", t, status, text, http_detail(&f, 2));
+    // 8. Steam's item definitions for the game: the fast route for the catalog.
+    let t = run.start("item_defs");
+    let mut auths: Vec<Auth> = vec![Auth::None, Auth::Key(key.as_str())];
+    if let Some(tok) = token.as_deref() {
+        auths.push(Auth::Token(tok));
+    }
+    let mut attempts = Map::new();
+    let mut defs_result: Option<(Vec<CatalogItem>, &str)> = None;
+    let mut defs_samples = Map::new();
+    let mut defs_status: Option<u16> = None;
+    for auth in &auths {
+        match steam.item_definitions(sample_app, *auth, notify).await {
+            Ok(f) => {
+                attempts.insert(auth.name().into(), http_detail(&f, 3));
+                defs_status = Some(f.status);
+                if f.status == 401 || f.status == 403 {
+                    continue;
+                }
+                if let Some(v) = f.json() {
+                    if let Some(items) = defs::parse(&v) {
+                        if let Some(list) = v["response"]["item_definitions"].as_array() {
+                            for d in list {
+                                let key =
+                                    format!("item_class_{}", int(&d["item_class"]).unwrap_or(0));
+                                defs_samples.entry(key).or_insert_with(|| shape(d, 2));
+                            }
+                        }
+                        defs_result = Some((items, auth.name()));
+                    }
+                }
+                break;
+            }
+            Err(e) => {
+                attempts.insert(auth.name().into(), json!({ "error": e }));
+                break;
+            }
         }
-        Err(e) => run.finish("points_catalog", t, StepStatus::Fail, e, Value::Null),
+    }
+    attempts.insert("samples".into(), Value::Object(defs_samples));
+    let mut defs_cards: Option<usize> = None;
+    match &defs_result {
+        Some((items, auth)) if !items.is_empty() => {
+            defs_cards = Some(defs::card_count(items));
+            let way = match *auth {
+                "none" => "without a key",
+                "key" => "with your API key",
+                _ => "with your sign-in",
+            };
+            run.finish(
+                "item_defs",
+                t,
+                StepStatus::Ok,
+                format!(
+                    "Works {way}: {} for app {sample_app}. This is the fast route for the catalog.",
+                    kinds_text(items)
+                ),
+                Value::Object(attempts),
+            );
+        }
+        Some(_) => run.finish(
+            "item_defs",
+            t,
+            StepStatus::Warn,
+            format!("Steam answered, but listed no items for app {sample_app}. The catalog would use card pages instead, which is slower."),
+            Value::Object(attempts),
+        ),
+        None => run.finish(
+            "item_defs",
+            t,
+            StepStatus::Warn,
+            format!(
+                "Steam's item list isn't available{}. The catalog would use card pages instead, which is slower.",
+                defs_status
+                    .map(|c| format!(" (code {c})"))
+                    .unwrap_or_default()
+            ),
+            Value::Object(attempts),
+        ),
     }
 
-    // 10. Points Shop items the user owns
+    // 9. The store check: which games have trading cards.
+    let t = run.start("store_cards");
+    let mut check: Vec<u64> = vec![sample_app];
+    check.extend(
+        owned_apps
+            .iter()
+            .copied()
+            .filter(|a| *a != sample_app)
+            .take(39),
+    );
+    let mut cards_ratio: Option<f64> = None;
+    let mut f = steam.store_items(&check, None, notify).await;
+    let mut store_auth = "without a key";
+    if matches!(&f, Ok(r) if r.status == 401 || r.status == 403) {
+        store_auth = "with your API key";
+        f = steam.store_items(&check, Some(key.as_str()), notify).await;
+    }
+    match f {
+        Ok(f) => {
+            let mut detail = http_detail(&f, 2);
+            if let (Value::Object(map), Some(v)) = (&mut detail, f.json()) {
+                map.insert(
+                    "first_item".into(),
+                    v["response"]["store_items"]
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .map(|i| shape(i, 3))
+                        .unwrap_or(Value::Null),
+                );
+            }
+            match f.json().as_ref().and_then(store::parse) {
+                Some(apps) if !apps.is_empty() => {
+                    let yes = apps.iter().filter(|a| a.has_cards == Some(true)).count();
+                    let no = apps.iter().filter(|a| a.has_cards == Some(false)).count();
+                    let unknown = apps.len() - yes - no;
+                    if yes + no > 0 {
+                        cards_ratio = Some(yes as f64 / (yes + no) as f64);
+                    }
+                    let (status, text) = if yes + no == 0 {
+                        (
+                            StepStatus::Warn,
+                            format!("The store answered {store_auth}, but without the trading card category for any of the {} games checked.", apps.len()),
+                        )
+                    } else {
+                        (
+                            StepStatus::Ok,
+                            format!(
+                                "Works {store_auth}: {yes} of {} games checked have trading cards{}.",
+                                apps.len(),
+                                if unknown > 0 { format!(", and {unknown} couldn't be told") } else { String::new() }
+                            ),
+                        )
+                    };
+                    run.finish("store_cards", t, status, text, detail);
+                }
+                _ => run.finish(
+                    "store_cards",
+                    t,
+                    StepStatus::Warn,
+                    format!("The store check didn't work (code {}). The scan would check each game's item list instead.", f.status),
+                    detail,
+                ),
+            }
+        }
+        Err(e) => run.finish("store_cards", t, StepStatus::Fail, e, Value::Null),
+    }
+
+    // 10. The game's card page: the slower catalog route.
+    let t = run.start("card_page");
+    match steam.card_page(&sid, sample_app, notify).await {
+        Ok(f) if f.skipped => run.finish(
+            "card_page",
+            t,
+            StepStatus::Skipped,
+            skipped_text(),
+            Value::Null,
+        ),
+        Ok(f) => {
+            let page = cardpage::parse(&f.body);
+            let mut detail = html_detail(
+                &f,
+                &[
+                    "badge_card_set_card",
+                    "badge_card_set_text_qty",
+                    "badge_card_set_text",
+                    "gamecard",
+                ],
+            );
+            if let Value::Object(map) = &mut detail {
+                map.insert(
+                    "parsed".into(),
+                    json!(page
+                        .cards
+                        .iter()
+                        .take(15)
+                        .map(|c| json!({
+                            "position": c.position,
+                            "name": c.name,
+                            "owned": c.owned,
+                            "series": c.series,
+                            "image": c.image.as_deref().map(|i| truncate(i, 90)),
+                        }))
+                        .collect::<Vec<_>>()),
+                );
+                map.insert("set_size".into(), json!(page.set_size));
+                map.insert(
+                    "first_card_html".into(),
+                    json!(f.body.find("badge_card_set_card").map(|i| around(
+                        &f.body,
+                        i + 1200,
+                        1200
+                    ))),
+                );
+            }
+            let with_images = page.cards.iter().filter(|c| c.image.is_some()).count();
+            let names: Vec<&str> = page.cards.iter().take(4).map(|c| c.name.as_str()).collect();
+            let agrees = match defs_cards {
+                Some(n) if n == page.cards.len() => {
+                    " It agrees with Steam's item list.".to_string()
+                }
+                Some(n) => format!(" Steam's item list had {n}."),
+                None => String::new(),
+            };
+            let (status, text) = if !f.is_success() {
+                (
+                    StepStatus::Fail,
+                    format!("Steam answered with code {}.", f.status),
+                )
+            } else if !page.cards.is_empty() {
+                (
+                    StepStatus::Ok,
+                    format!(
+                        "Read {} cards for app {sample_app} ({}{}), {with_images} with artwork.{agrees}",
+                        page.cards.len(),
+                        names.join(", "),
+                        if page.cards.len() > names.len() { ", …" } else { "" }
+                    ),
+                )
+            } else {
+                (
+                    StepStatus::Warn,
+                    format!("The page loaded, but no cards could be read for app {sample_app}."),
+                )
+            };
+            run.finish("card_page", t, status, text, detail);
+        }
+        Err(e) => run.finish("card_page", t, StepStatus::Fail, e, Value::Null),
+    }
+
+    // 11. The Points Shop catalog for the sample game and a few others in one
+    // request, and the list of games and sale events with a Points Shop page.
+    let t = run.start("points_catalog");
+    let mut batch: Vec<u64> = vec![sample_app];
+    batch.extend(
+        badge_apps
+            .iter()
+            .map(|(app_id, _)| *app_id)
+            .filter(|a| *a != sample_app)
+            .take(4),
+    );
+    let mut detail = Map::new();
+    let page = match steam.reward_items(&batch, None, notify).await {
+        Ok(f) => {
+            detail.insert("query".into(), http_detail(&f, 2));
+            if let Some(v) = f.json() {
+                let mut samples = Map::new();
+                for d in v["response"]["definitions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let key = format!(
+                        "item_class_{}",
+                        int(&d["community_item_class"]).unwrap_or(0)
+                    );
+                    samples.entry(key).or_insert_with(|| shape(d, 3));
+                }
+                detail.insert("samples".into(), Value::Object(samples));
+            }
+            f.json().as_ref().and_then(points::parse_page)
+        }
+        Err(e) => {
+            detail.insert("query".into(), json!({ "error": e }));
+            None
+        }
+    };
+    let events = match steam.eligible_apps(notify).await {
+        Ok(f) => {
+            detail.insert("eligible_apps".into(), http_detail(&f, 1));
+            f.json().as_ref().and_then(points::parse_eligible_apps)
+        }
+        Err(e) => {
+            detail.insert("eligible_apps".into(), json!({ "error": e }));
+            None
+        }
+    };
+    match page {
+        Some(page) => {
+            let mut per_app: BTreeMap<u64, Vec<CatalogItem>> = BTreeMap::new();
+            for p in &page.items {
+                per_app.entry(p.appid).or_default().push(p.item.clone());
+            }
+            let sample_items = per_app.get(&sample_app).cloned().unwrap_or_default();
+            detail.insert(
+                "items_per_game".into(),
+                json!(per_app
+                    .iter()
+                    .map(|(a, l)| (a.to_string(), l.len()))
+                    .collect::<BTreeMap<_, _>>()),
+            );
+            detail.insert("next_cursor".into(), json!(page.next_cursor));
+            detail.insert("total".into(), json!(page.total));
+            let events_text = events
+                .as_ref()
+                .map(|e| {
+                    format!(
+                        " Steam lists {} games and {} sale events with a Points Shop page.",
+                        fmt_num(e.len() as u64),
+                        fmt_num(e.iter().filter(|(_, ev)| *ev).count() as u64)
+                    )
+                })
+                .unwrap_or_default();
+            let text = if sample_items.is_empty() {
+                format!(
+                    "The Points Shop lists no items for app {sample_app}; {} items across the {} games asked about.{events_text}",
+                    page.items.len(),
+                    batch.len()
+                )
+            } else {
+                format!(
+                    "App {sample_app}: {}. One request covered {} games with {} items.{events_text}",
+                    kinds_text(&sample_items),
+                    per_app.len(),
+                    page.items.len()
+                )
+            };
+            run.finish(
+                "points_catalog",
+                t,
+                StepStatus::Ok,
+                text,
+                Value::Object(detail),
+            );
+        }
+        None => run.finish(
+            "points_catalog",
+            t,
+            StepStatus::Fail,
+            "The Points Shop catalog couldn't be read.",
+            Value::Object(detail),
+        ),
+    }
+
+    // 12. Profile items the user owns, including Points Shop purchases
     let t = run.start("points_owned");
     match token.as_deref() {
         None => run.finish(
@@ -813,11 +1072,17 @@ pub async fn run(
                             })
                         })
                         .unwrap_or(0);
+                    let kinds = f
+                        .json()
+                        .as_ref()
+                        .and_then(library::parse_profile_items)
+                        .map(|items| owned_kinds_text(&items))
+                        .unwrap_or_default();
                     let (status, text) = if f.is_success() {
                         (
                             StepStatus::Ok,
                             format!(
-                                "Steam listed {} Points Shop items you own.",
+                                "Steam listed {} profile items you own{kinds}.",
                                 fmt_num(owned as u64)
                             ),
                         )
@@ -834,7 +1099,49 @@ pub async fn run(
         }
     }
 
-    // 11. Steam Family library
+    // 13. Every emoticon the user can use
+    let t = run.start("emoticons");
+    match token.as_deref() {
+        None => run.finish(
+            "emoticons",
+            t,
+            StepStatus::Skipped,
+            NEEDS_SIGN_IN,
+            Value::Null,
+        ),
+        Some(tok) => match steam.emoticons(tok, notify).await {
+            Ok(f) => {
+                let list = f.json().as_ref().and_then(library::parse_emoticons);
+                let detail = http_detail(&f, 3);
+                match list {
+                    Some(list) => {
+                        let games: BTreeSet<u64> = list.iter().map(|e| e.appid).collect();
+                        run.finish(
+                            "emoticons",
+                            t,
+                            StepStatus::Ok,
+                            format!(
+                                "You can use {} emoticons from {} games.",
+                                fmt_num(list.len() as u64),
+                                fmt_num(games.len() as u64)
+                            ),
+                            detail,
+                        );
+                    }
+                    None => run.finish(
+                        "emoticons",
+                        t,
+                        StepStatus::Fail,
+                        format!("Steam didn't return your emoticons (code {}).", f.status),
+                        detail,
+                    ),
+                }
+            }
+            Err(e) => run.finish("emoticons", t, StepStatus::Fail, e, Value::Null),
+        },
+    }
+
+    // 14. Steam Family library
     let t = run.start("family");
     match token.as_deref() {
         None => run.finish("family", t, StepStatus::Skipped, NEEDS_SIGN_IN, Value::Null),
@@ -900,7 +1207,7 @@ pub async fn run(
         }
     }
 
-    // 12. The badges page (lists card drops remaining and badge progress)
+    // 15. The badges page (lists card drops remaining and badge progress)
     let t = run.start("badge_page");
     let url = community_url(&format!("/profiles/{sid}/badges/"), &[("l", "english")]);
     match steam.fetch(Bucket::Community, &url, None, notify).await {
@@ -945,24 +1252,29 @@ pub async fn run(
         Err(e) => run.finish("badge_page", t, StepStatus::Fail, e, Value::Null),
     }
 
-    // Estimate how long a full item scan would take at this pacing.
+    // Estimate how long a first full scan would take at this pacing.
     let mut apps: BTreeSet<u64> = badge_apps.iter().map(|(app_id, _)| *app_id).collect();
     apps.extend(inventory_apps.iter().copied());
     apps.remove(&753);
-    let inventory_pages = inventory_total
-        .map(|n| n.div_ceil(2000))
-        .unwrap_or(1)
-        .max(1);
-    let seconds = inventory_pages as f64 * 4.0 + apps.len() as f64 * (3.5 + 4.0) + 5.0;
+    let card_games = match cards_ratio {
+        Some(ratio) => apps
+            .len()
+            .max((owned_count as f64 * ratio).round() as usize),
+        None => apps.len(),
+    };
+    let fast = defs_cards.is_some();
+    let per_game = if fast { 0.5 } else { 4.2 };
+    let seconds = card_games as f64 * per_game + 30.0;
     let minutes = (seconds / 60.0).ceil() as u64;
-    let estimate = if apps.is_empty() {
-        "The full scan time couldn't be estimated because no games with items were found yet."
+    let estimate = if card_games == 0 {
+        "The full scan time couldn't be estimated because no games with trading cards were found yet."
             .to_string()
     } else {
         format!(
-            "A full item scan would take about {} for the {} games found with items so far. Price history would then fill in gradually in the background.",
+            "A first full scan would take about {} for roughly {} games with trading cards, using {}. Later scans only read what's new.",
             plural(minutes, "minute"),
-            fmt_num(apps.len() as u64)
+            fmt_num(card_games as u64),
+            if fast { "Steam's item list" } else { "card pages" }
         )
     };
 
@@ -1043,6 +1355,38 @@ pub async fn run(
         estimate,
         total_seconds,
     })
+}
+
+/// "8 cards, 8 foil cards, 5 emoticons…" for a list of catalog items.
+fn kinds_text(items: &[CatalogItem]) -> String {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for i in items {
+        *counts
+            .entry(kind_label(i.class, i.foil, i.animated))
+            .or_default() += 1;
+    }
+    let mut list: Vec<(&str, usize)> = counts.into_iter().collect();
+    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    list.iter()
+        .map(|(label, n)| format!("{n} {}", label.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// " (12 backgrounds, 3 avatar frames…)" for owned profile items.
+fn owned_kinds_text(items: &[library::OwnedProfileItem]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for i in items {
+        *counts.entry(kind_label(i.class, false, false)).or_default() += 1;
+    }
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|(label, n)| format!("{n} {}", label.to_lowercase()))
+        .collect();
+    format!(": {}", parts.join(", "))
 }
 
 fn http_detail(f: &Fetched, depth: usize) -> Value {

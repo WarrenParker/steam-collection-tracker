@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use crate::db::{self, Db};
 use crate::paths::AppPaths;
+use crate::scan::ScanControl;
 use crate::session::Session;
 use crate::settings::Settings;
 use crate::steam::SteamClient;
@@ -19,10 +21,20 @@ pub struct AppState {
     pub update: Mutex<UpdateState>,
     /// The Steam sign-in, cached while it's valid.
     pub session: tokio::sync::Mutex<Option<Session>>,
+    /// The collection database.
+    pub db: Db,
+    /// Set when the database file couldn't be opened and a temporary one is in use.
+    pub db_problem: Option<String>,
+    /// The background scan.
+    pub scan: ScanControl,
 }
 
 impl AppState {
     pub fn new(paths: AppPaths, settings: Settings) -> Self {
+        let (db, db_problem) = match Db::open(&paths.root.join(db::FILE_NAME)) {
+            Ok(db) => (db, None),
+            Err(e) => (Db::in_memory(), Some(e)),
+        };
         Self {
             paths,
             settings: Mutex::new(settings),
@@ -31,6 +43,9 @@ impl AppState {
             busy: AtomicBool::new(false),
             update: Mutex::new(UpdateState::default()),
             session: tokio::sync::Mutex::new(None),
+            db,
+            db_problem,
+            scan: ScanControl::new(),
         }
     }
 
