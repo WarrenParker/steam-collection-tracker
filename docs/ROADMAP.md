@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.4.2. Phase 1 is done; Phase 2 is next.
+**Now:** version 0.5.0. Phase 2 is done; Phase 3 is next.
 
 ## Goal
 
@@ -30,17 +30,20 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Confirmed with connection tests and full scans of a real account, and cross-checked against SteamCardExchange. [Results](STEAM-DATA.md#cross-checks)
 - ✅ Owned games with items, and achievement progress. [0.4.0](../CHANGELOG.md#040---2026-10-22)
 
-## Phase 2: Completion and tags
+## Phase 2: Completion and tags (done)
 
-- ⬜ Completion per game and for the whole account. A badge counts as owning its cards (a setting can require the cards too), and a game's cards are complete at badge level 5 plus the foil badge.
-- ⬜ Steam Family games count toward the account-wide figure when the Steam Family setting is on.
-- ⬜ Tags: Unowned, Family shared, Points (no market price), Unobtainable, Limited/Event, Not marketable, Unverified, Price spike, Price dip.
-- ⬜ Availability detection, with manual tag override. Unobtainable items are tagged but left out of the percentage, and old items Steam no longer lists appear only if you own them.
+- ✅ Completion per game and for the whole account. Cards count by badge level plus copies held, and a game's cards are complete at badge level 5 plus the foil badge. A setting can require a set of cards in the inventory too. Booster packs are shown but not counted. [0.5.0](../CHANGELOG.md#050---2026-10-22)
+- ✅ Each game broken down by kind: cards, foil cards, emoticons, backgrounds and Points Shop items. The account shows items complete (every item weighs the same) and the average game (every game weighs the same). [0.5.0](../CHANGELOG.md#050---2026-10-22)
+- ✅ Steam Family games count toward the account-wide figure when the Steam Family setting is on. Unowned games and sale events show their own completion but don't count. [0.5.0](../CHANGELOG.md#050---2026-10-22)
+- ✅ Tags: Unowned, Family shared, Points, Unobtainable, Limited/Event, Not marketable, Unverified. Price spike and dip move to Phase 3 with prices. [0.5.0](../CHANGELOG.md#050---2026-10-22)
+- ✅ Availability detection from the Points Shop's dates, items that can't be bought on their own, bundles and sale events, with a manual override per item. Unobtainable items are tagged but left out of the percentage, and old items Steam no longer lists appear only if you own them. [0.5.0](../CHANGELOG.md#050---2026-10-22)
+- ✅ Owned items matched by game, item class, item number and foil, falling back to the name when Steam doesn't give the number. [0.5.0](../CHANGELOG.md#050---2026-10-22)
 
 ## Phase 3: Prices
 
 - ⬜ Current, lowest historical and average price for every item.
-- ⬜ Spike and dip tags with adjustable sensitivity.
+- ⬜ Price spike and Price dip tags with adjustable sensitivity.
+- ⬜ Confirm which items are marketable from the Market itself, replacing the rule of thumb behind the Points and Not marketable tags.
 - ⬜ Currency setting, USD by default.
 - ⬜ Account value before market fees.
 - ⬜ Cost to complete, with dollars and points shown separately.
@@ -73,3 +76,4 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - **The catalog doesn't need the market.** Card pages and the Points Shop describe every item in a set, so the market is only needed for prices.
 - **Sign-in is recommended.** Steam refuses inventory and market requests from apps that aren't signed in. Sign-in happens on Steam's own page, and the app never handles the password.
 - **Plain language everywhere.** Every message says what happened and what to do next.
+- **How completion counts.** Booster packs don't count. Each card needs five copies' worth, from badge levels and copies held. Reward items that can't be bought on their own are tagged Limited and still count unless marked Unobtainable. The account figure covers owned games, plus Steam Family games when that setting is on.

@@ -89,6 +89,14 @@
     }
   }
 
+  async function toggleKeepSet() {
+    try {
+      onchange(await api.updatePreferences({ keep_card_set: !settings.keep_card_set }));
+    } catch (e) {
+      error = errorText(e);
+    }
+  }
+
   async function saveKey(e: SubmitEvent) {
     e.preventDefault();
     busy = true;
@@ -276,8 +284,8 @@
           <div>Include Steam Family games</div>
           <div class="desc">
             {settings.signed_in
-              ? 'Lists games other members of your Steam Family share with you. Scan again to read their items.'
-              : 'Lists games your Steam Family shares with you. Needs Steam sign-in.'}
+              ? 'Lists games other members of your Steam Family share with you and counts them toward your account figure. Scan again to read their items.'
+              : 'Lists games your Steam Family shares with you and counts them toward your account figure. Needs Steam sign-in.'}
           </div>
         </div>
         <button
@@ -286,6 +294,23 @@
           aria-checked={settings.include_family}
           aria-label="Include Steam Family games"
           onclick={toggleFamily}
+        ></button>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div>Also need the cards in my inventory</div>
+          <div class="desc">
+            {settings.keep_card_set
+              ? "A game's cards count as complete when you hold one of each card on top of a level 5 badge and the foil badge."
+              : "A badge counts as owning its cards. A game's cards are complete at badge level 5 plus the foil badge."}
+          </div>
+        </div>
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={settings.keep_card_set}
+          aria-label="Also need the cards in my inventory"
+          onclick={toggleKeepSet}
         ></button>
       </div>
     </section>

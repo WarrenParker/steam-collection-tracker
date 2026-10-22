@@ -30,6 +30,7 @@ src-tauri/                    The engine
   src/steam/                  Paced Steam client, response parsing, inventory reading
   src/catalog/                Reading each item source into one catalog shape
   src/db.rs                   The collection database: schema, saving and queries
+  src/completion.rs           Completion per game and account, tags and availability
   src/scan.rs                 The background scan, its stages, pausing and estimates
   src/session.rs              Steam sign-in, renewal and sign-out
   src/diagnostics.rs          The connection test and its report
@@ -71,10 +72,11 @@ The sign-in cookies are kept. Version 0.2.0's `cache/last_scan.json` is moved in
 | Table | What's in it |
 |---|---|
 | `apps` | Every game the app knows: owned, Steam Family, or with items or badges. Store details, whether it has trading cards, and when each source was last read. |
-| `items` | Every item in each game's catalog, keyed by game, item class, type number and foil. Each row records whether it came from the item list (`in_catalog`) and whether the Points Shop sells it (`in_points`, with the price in points and availability). |
+| `items` | Every item in each game's catalog, keyed by game, item class, type number and foil. Each row records whether it came from the item list (`in_catalog`) and whether the Points Shop sells it (`in_points`, with the price in points, availability dates, and `points_buyable`: 1 sold on its own, 2 only in a bundle, 0 neither). |
 | `inventory` | One row per kind of item the user holds, with quantities. |
 | `profile_items` | Emoticons and profile items from the signed-in user's account, including Points Shop purchases. |
 | `badges` | The user's badges and levels. |
+| `item_overrides` | Availability the user set by hand, keyed by item. Kept across scans. |
 | `scans` | One row per scan, with the overview summary it produced. |
 | `meta` | Small values, such as which catalog route works on this connection. |
 
@@ -86,10 +88,21 @@ A scan runs in the background in four stages. Progress is saved as it goes, so a
 
 1. **Library:** profile, owned games, badges, inventory, achievement progress and, when signed in, the Steam Family library and profile items.
 2. **Store check:** which games have trading cards (the store's category 29) and names for games the user doesn't own. 100 games per request.
-3. **Points Shop:** every item each game sells for points, 20 games per request, plus the list of apps that are Steam sale events.
+3. **Points Shop:** every item each game sells for points, 20 games per request, plus the list of apps that are Steam sale events. Each batch is read twice, with and without items that can't be bought directly, to tell sale rewards from items for sale. Games where the user owns an item no list includes are read again, at most once a day.
 4. **Item catalog:** each card game's card set, from its card page. The page numbers cards by their place in the set, so the app takes Steam's real item numbers from any card the user owns. Emoticons and backgrounds come from the Points Shop stage, and every game with cards also gets its booster pack.
 
 Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30. A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page requests, the scan stops, waits 30 minutes, and carries on by itself while the app is open. Only one copy of the app runs at a time; opening it again brings the existing window forward.
+
+## Completion
+
+`completion.rs` works out completion from the database whenever the interface asks; nothing extra is stored.
+
+- **Matching.** Owned items (inventory and profile items) are matched to the catalog by game, item class, Steam's item number and foil. Profile items always carry the number; some inventory items don't, so those fall back to the name. Each game has one booster pack, matched whatever its number. An owned item that matches nothing is added to its game's list, so items Steam no longer lists only show up for people who own them.
+- **Cards** count by copies. Each badge level uses one copy of every card, so a card needs 5 copies' worth: the badge level plus copies held. A foil card needs the foil badge or one copy. The "Also need the cards in my inventory" setting adds one copy to each.
+- **What counts.** Every catalog item except booster packs and items that are Unobtainable. A game's percentage is the share of its counted items owned, with cards counted by their share of copies.
+- **Account.** Games owned, plus Steam Family games when that setting is on. The headline weighs every item equally; the average game weighs every game equally, including games at 0%.
+- **Availability.** Cards and booster packs are available. A Points Shop item is Unobtainable when Steam marks it inactive or its end date has passed, and Limited when it has a future end or start date, can't be bought on its own (sale rewards, event items), or belongs to a Steam sale event. Owned items no list includes are Unobtainable once their game's Points Shop has been read. The user's override wins.
+- **Tags.** Unowned and Family shared come from the game. Points means the item is sold for points and not on the Market. Not marketable covers Points Shop exclusives; cards, booster packs and a card set's emoticons and backgrounds are marketable, and a copy the user can sell settles it. Unverified marks items matched by name, and owned items whose game list hasn't been read yet.
 
 ## Talking to Steam
 

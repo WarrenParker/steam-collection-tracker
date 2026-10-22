@@ -1,5 +1,6 @@
 mod catalog;
 mod commands;
+mod completion;
 mod db;
 mod diagnostics;
 mod hexutil;
@@ -52,6 +53,9 @@ pub fn run() {
             commands::get_scan_status,
             commands::get_last_scan,
             commands::get_games,
+            commands::get_completion,
+            commands::get_game_detail,
+            commands::set_item_availability,
             commands::get_diagnostics_plan,
             commands::run_diagnostics,
             commands::read_report,

@@ -54,6 +54,17 @@ export function date(iso: string | null): string {
     : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** "42.5%", or a dash when there's nothing to count. */
+export function pct(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '–';
+  return `${n % 1 === 0 ? n.toFixed(0) : n.toFixed(1)}%`;
+}
+
+/** Owned item counts, which can include part of a card. */
+export function owned(n: number): string {
+  return n % 1 === 0 ? num(n) : n.toLocaleString('en-US', { maximumFractionDigits: 1 });
+}
+
 export function bytes(n: number): string {
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;

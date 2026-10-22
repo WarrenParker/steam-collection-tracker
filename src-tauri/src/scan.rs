@@ -13,7 +13,7 @@
 //! date. When Steam refuses card page requests, the scan stops and resumes by
 //! itself once the block has had time to clear.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -23,6 +23,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::catalog::{cardpage, library, points, store};
+use crate::completion;
 use crate::db::{self, CatalogCounts, CatalogTarget, LibraryUpdate};
 use crate::paths::AppPaths;
 use crate::session::{self, Session};
@@ -554,6 +555,21 @@ async fn read_library(
         db::set_meta(tx, META_LIBRARY_READ, &db::now().to_string())
     })?;
 
+    // Games where the user owns an item no list includes have their Points
+    // Shop read again, at most once a day, in case the item is new.
+    let rules = completion::Rules {
+        keep_card_set: false,
+        include_family: state.settings().include_family,
+    };
+    if let Ok(apps) = state
+        .db
+        .read(|c| completion::compute(c, rules, db::now()).map(|s| s.apps_with_unlisted()))
+    {
+        let _ = state
+            .db
+            .write(|tx| db::expire_points(tx, &apps, db::now() - DAY));
+    }
+
     // Achievement progress for every owned game: a couple of quick requests.
     ctx.label("Reading your achievements…");
     let ach_apps = state
@@ -589,7 +605,7 @@ async fn read_library(
         }
     }
 
-    let owned: std::collections::HashSet<u64> = games.games.iter().map(|g| g.appid).collect();
+    let owned: HashSet<u64> = games.games.iter().map(|g| g.appid).collect();
     let apps_not_owned = if games.visible {
         item_apps.keys().filter(|a| !owned.contains(a)).count() as u64
     } else {
@@ -701,28 +717,28 @@ async fn catalog_stages(
         data.read(|c| db::apps_needing_points(c, family_on, db::now() - POINTS_STALE_DAYS * DAY))?;
     ctx.stage(3, "Reading the Points Shop…", pending.len() as u64);
     let mut done = 0u64;
-    'batches: for batch in pending.chunks(points::APPS_PER_REQUEST) {
+    for batch in pending.chunks(points::APPS_PER_REQUEST) {
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
         }
-        let mut items = Vec::new();
-        let mut cursor: Option<String> = None;
-        for _ in 0..MAX_POINTS_PAGES {
-            let f = state
-                .steam
-                .reward_items(batch, cursor.as_deref(), true, notify)
-                .await?;
-            let Some(page) = f.json().as_ref().and_then(points::parse_page) else {
-                break 'batches;
-            };
-            let last = page.definitions < points::PAGE_SIZE as usize
-                || page.next_cursor.is_none()
-                || page.next_cursor == cursor;
-            items.extend(page.items.into_iter().filter(|i| batch.contains(&i.appid)));
-            if last {
-                break;
+        // Everything, including items that can't be bought on their own, then
+        // only what can be bought, to tell the two apart.
+        let Some((mut items, mut bundled)) = read_points(state, batch, true, notify).await? else {
+            break;
+        };
+        let buyable = read_points(state, batch, false, notify).await?;
+        if let Some((sold, more_bundled)) = &buyable {
+            let sold: HashSet<i64> = sold.iter().map(|i| i.defid).collect();
+            bundled.extend(more_bundled);
+            for item in &mut items {
+                item.buyable = Some(if sold.contains(&item.defid) {
+                    1
+                } else if bundled.contains(&item.defid) {
+                    2
+                } else {
+                    0
+                });
             }
-            cursor = page.next_cursor;
         }
         data.write(|tx| db::save_points(tx, batch, &items))?;
         done += batch.len() as u64;
@@ -784,6 +800,38 @@ async fn catalog_stages(
     }
 
     Ok(RunEnd::Done { seconds: 0 })
+}
+
+/// Every Points Shop item for a batch of games, and the items sold inside
+/// bundles. `None` when Steam's answer wasn't a Points Shop answer.
+async fn read_points(
+    state: &AppState,
+    batch: &[u64],
+    include_unbuyable: bool,
+    notify: Notify<'_>,
+) -> Result<Option<(Vec<points::PointsItem>, HashSet<i64>)>, String> {
+    let mut items = Vec::new();
+    let mut bundled = HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_POINTS_PAGES {
+        let f = state
+            .steam
+            .reward_items(batch, cursor.as_deref(), include_unbuyable, notify)
+            .await?;
+        let Some(page) = f.json().as_ref().and_then(points::parse_page) else {
+            return Ok(None);
+        };
+        let last = page.definitions < points::PAGE_SIZE as usize
+            || page.next_cursor.is_none()
+            || page.next_cursor == cursor;
+        bundled.extend(page.bundled.iter().copied());
+        items.extend(page.items.into_iter().filter(|i| batch.contains(&i.appid)));
+        if last {
+            break;
+        }
+        cursor = page.next_cursor;
+    }
+    Ok(Some((items, bundled)))
 }
 
 fn save_summary(state: &AppState, scan_id: i64, summary: &ScanSummary) {
