@@ -887,15 +887,17 @@ pub fn market_has(c: &Connection, hash_name: &str) -> rusqlite::Result<bool> {
     )
 }
 
-/// Items in games that count whose price history hasn't been read yet.
-pub fn history_missing(c: &Connection, family: bool) -> rusqlite::Result<u64> {
+/// Items in games that count whose price history hasn't been read yet and
+/// isn't waiting for a retry.
+pub fn history_missing(c: &Connection, family: bool, now: i64) -> rusqlite::Result<u64> {
     let n: i64 = c.query_row(
         &format!(
             "SELECT COUNT(*) FROM market m JOIN apps a ON a.appid = m.appid
              WHERE m.class IN {MARKET_CLASSES} AND m.history_at IS NULL
+               AND (m.history_due IS NULL OR m.history_due <= ?2)
                AND (a.owned = 1 OR (a.family = 1 AND ?1))"
         ),
-        [family],
+        params![family, now],
         |r| r.get(0),
     )?;
     Ok(n.max(0) as u64)

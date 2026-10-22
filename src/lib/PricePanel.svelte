@@ -99,7 +99,11 @@
         {#if item.cost !== null}
           <dt>To finish</dt>
           <dd>
-            {money(item.cost, currency)}{copies > 1 ? ` for ${copies} copies` : ''}{#if item.cost_estimated}<span
+            {money(item.cost, currency)}{copies > 1 ? ` for ${copies} copies` : ''}{#if item.cost_capped}<span
+                class="muted"
+                title="Listed at more than three times its usual price, so it's counted at its 90-day average sale price"
+              > · estimated: listed far above its usual price</span
+              >{:else if item.cost_estimated}<span
                 class="muted"
                 title="Priced at today's cheapest listing until the order book is read"> · estimated</span
               >{/if}

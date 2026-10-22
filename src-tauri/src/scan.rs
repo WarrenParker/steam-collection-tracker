@@ -353,17 +353,21 @@ fn backlog(state: &AppState) -> (u64, Option<u64>) {
     (remaining, seconds)
 }
 
-/// Price histories not read yet, once reading them has started (before
-/// that, the first fill waits for a go-ahead and isn't "unfinished").
+/// Price histories not read yet, once Market prices have been read.
 fn price_backlog(state: &AppState) -> (u64, Option<u64>) {
     let family = state.settings().include_family;
-    let started = state.db.read(db::has_any_history).unwrap_or(false);
-    if !started {
+    let read = state
+        .db
+        .read(|c| db::get_meta(c, "market_currency_at"))
+        .ok()
+        .flatten()
+        .is_some();
+    if !read {
         return (0, None);
     }
     let missing = state
         .db
-        .read(|c| db::history_missing(c, family))
+        .read(|c| db::history_missing(c, family, db::now()))
         .unwrap_or(0);
     let seconds =
         (missing > 0).then(|| (missing as f64 * crate::prices::SECONDS_PER_REQUEST).ceil() as u64);
