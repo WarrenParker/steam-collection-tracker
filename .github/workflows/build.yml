@@ -35,16 +35,20 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Install interface packages
-        run: npm install
+        shell: bash
+        run: set -o pipefail; npm install 2>&1 | tee -a build.log
 
       - name: Build interface
-        run: npm run build
+        shell: bash
+        run: set -o pipefail; npm run build 2>&1 | tee -a build.log
 
       - name: Run tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        shell: bash
+        run: set -o pipefail; cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tee -a build.log
 
       - name: Build app
-        run: npx tauri build
+        shell: bash
+        run: set -o pipefail; npx tauri build 2>&1 | tee -a build.log
 
       - name: Package
         shell: pwsh
@@ -55,6 +59,24 @@ jobs:
           Set-Content -Path out/SteamCollectionTracker.exe.sha256 -Value $hash -NoNewline
           $size = [math]::Round((Get-Item out/SteamCollectionTracker.exe).Length / 1MB, 1)
           "Built SteamCollectionTracker.exe ($size MB), sha256 $hash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Built SteamCollectionTracker.exe ($size MB)" | Out-File -FilePath build.log -Append
+
+      # Post a short build report as an annotation, which can be read through
+      # GitHub's API: test results, warnings and size on success, the tail of
+      # the log on failure.
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          encode() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          touch build.log
+          if [ "${{ job.status }}" = "success" ]; then
+            body=$( { grep -E "test result|Built SteamCollectionTracker" build.log; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40; } | encode)
+            echo "::notice title=Build report::${body}"
+          else
+            body=$(grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log | tail -n 150 | encode)
+            echo "::error title=Build failed::${body}"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
