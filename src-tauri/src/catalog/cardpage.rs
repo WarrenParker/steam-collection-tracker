@@ -144,27 +144,52 @@ pub fn base_card_name(name: &str) -> String {
 }
 
 /// The card page numbers cards by their place in the set, but Steam's own
-/// item numbers usually start later (a set's cards might be 3 to 8). When the
-/// user owns any of the cards, their inventory gives the real numbers: the
-/// difference is the same for the whole set, so every card can be renumbered.
-/// Returns true when the numbers were corrected.
+/// item numbers usually start later, and some sets skip numbers (one set's
+/// cards are 2, 5, 9, 13 and 14). Cards the user owns carry their real
+/// numbers, so those are used directly. The rest are shifted by the most
+/// common difference, which is right for the usual unbroken run of numbers.
+/// A shifted number that would clash with an owned card's real number gets a
+/// placeholder (minus the place in the set) instead, so no two cards merge.
+/// Returns true when any numbers were corrected.
 pub fn apply_known_types(items: &mut [CatalogItem], known: &[(String, i64)]) -> bool {
-    let mut votes: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    let known: HashMap<String, i64> = known
+        .iter()
+        .map(|(name, item_type)| (base_card_name(name), *item_type))
+        .collect();
+    // Place in the set -> real number, for the cards the user owns.
+    let mut exact: BTreeMap<i64, i64> = BTreeMap::new();
     for item in items.iter().filter(|i| i.class == class::CARD && !i.foil) {
-        let Some(title) = item.title.as_deref().map(base_card_name) else {
-            continue;
-        };
-        for (name, item_type) in known {
-            if base_card_name(name) == title {
-                *votes.entry(item_type - item.item_type).or_default() += 1;
-            }
+        if let Some(real) = item
+            .title
+            .as_deref()
+            .map(base_card_name)
+            .and_then(|t| known.get(&t).copied())
+        {
+            exact.insert(item.item_type, real);
         }
     }
-    let Some((offset, _)) = votes.into_iter().max_by_key(|(_, n)| *n) else {
+    if exact.is_empty() {
         return false;
-    };
+    }
+    let mut votes: BTreeMap<i64, usize> = BTreeMap::new();
+    for (place, real) in &exact {
+        *votes.entry(real - place).or_default() += 1;
+    }
+    // Most votes wins; a tie goes to the smallest difference.
+    let offset = votes
+        .iter()
+        .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        .map(|(o, _)| *o)
+        .unwrap_or(0);
+    let taken: BTreeSet<i64> = exact.values().copied().collect();
     for item in items.iter_mut().filter(|i| i.class == class::CARD) {
-        item.item_type += offset;
+        let place = item.item_type;
+        item.item_type = match exact.get(&place) {
+            Some(real) => *real,
+            None if taken.contains(&(place + offset)) => -place,
+            None => place + offset,
+        };
     }
     true
 }
@@ -237,6 +262,33 @@ mod tests {
                 (7, false),
                 (7, true)
             ]
+        );
+        // A set with gaps: the owned cards keep their real numbers, and a
+        // shifted number that would clash gets a placeholder.
+        let mut gaps = to_items(&parse(PAGE));
+        let owned = vec![
+            ("Tom & Jerry".to_string(), 2),
+            ("The Spy (Foil)".to_string(), 3),
+        ];
+        assert!(apply_known_types(&mut gaps, &owned));
+        let normal: Vec<i64> = gaps
+            .iter()
+            .filter(|i| !i.foil)
+            .map(|i| i.item_type)
+            .collect();
+        assert_eq!(normal, vec![2, 3, 4]);
+        let mut clash = to_items(&parse(PAGE));
+        let owned = vec![("Tom & Jerry".to_string(), 5), ("Engineer".to_string(), 6)];
+        assert!(apply_known_types(&mut clash, &owned));
+        let normal: Vec<i64> = clash
+            .iter()
+            .filter(|i| !i.foil)
+            .map(|i| i.item_type)
+            .collect();
+        assert_eq!(
+            normal,
+            vec![5, -2, 6],
+            "the Spy's shifted number would clash with Tom & Jerry's 5"
         );
         let mut untouched = to_items(&parse(PAGE));
         assert!(!apply_known_types(

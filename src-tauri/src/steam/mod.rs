@@ -22,7 +22,7 @@ pub const COMMUNITY: &str = "https://steamcommunity.com";
 pub const STORE: &str = "https://store.steampowered.com";
 
 /// Used for Steam's web pages until the interface reports WebView2's own identity.
-const FALLBACK_BROWSER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+const FALLBACK_BROWSER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0";
 
 /// How long the app leaves a kind of request alone after Steam refuses it.
 pub const BLOCK_MINUTES: u64 = 30;
@@ -122,8 +122,6 @@ pub struct Badge {
 /// How a Web API call identifies itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Auth<'a> {
-    /// No key or token: public calls.
-    None,
     /// The user's Web API key.
     Key(&'a str),
     /// The signed-in user's token.
@@ -133,7 +131,6 @@ pub enum Auth<'a> {
 impl Auth<'_> {
     pub fn name(self) -> &'static str {
         match self {
-            Auth::None => "none",
             Auth::Key(_) => "key",
             Auth::Token(_) => "token",
         }
@@ -612,7 +609,6 @@ impl SteamClient {
             .collect();
         let mut form: Vec<(&str, &str)> = vec![("steamid", steam_id), ("language", "english")];
         match auth {
-            Auth::None => {}
             Auth::Key(k) => form.push(("key", k)),
             Auth::Token(t) => form.push(("access_token", t)),
         }

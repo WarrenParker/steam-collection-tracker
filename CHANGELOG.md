@@ -2,6 +2,12 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.4.2] - 2026-10-22
+
+### Fixed
+
+- Cards you own keep their exact Steam item numbers even in sets whose numbers have gaps, so every owned card lines up with the catalog. A scan on 0.4.1 matched 22 of 23 owned cards; the one miss was in a set like that.
+
 ## [0.4.1] - 2026-10-22
 
 ### Fixed
