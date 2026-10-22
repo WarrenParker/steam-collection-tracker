@@ -13,6 +13,7 @@ A guide to the code, the data folder, and how versions get built and released.
 
 ```text
 .github/workflows/build.yml   Builds and tests every push to main; releases new versions
+.github/workflows/tidy-branches.yml  Deletes branches already merged into main
 CHANGELOG.md                  Every version's changes; release notes come from here
 docs/                         Roadmap, ideas, architecture, Steam data notes
 index.html, src/              The interface
@@ -113,7 +114,7 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 
 - **Semantic versioning** (MAJOR.MINOR.PATCH). The version is set in `src-tauri/Cargo.toml` and `package.json`, and every version has a section in `CHANGELOG.md`.
 - **To release a version:** set the new version in `src-tauri/Cargo.toml` and `package.json`, add a section for it at the top of `CHANGELOG.md`, and push to `main`.
-- **Every push to `main`** runs `.github/workflows/build.yml` on a Windows runner: interface build, `cargo test`, `tauri build`, then packaging. Feature branches are built by starting the same workflow on the branch (`gh workflow run build.yml --ref <branch>`); branch builds never publish a release.
+- **Every push to `main`** runs `.github/workflows/build.yml` on a Windows runner: interface build, `cargo test`, `tauri build`, then packaging. Feature branches are built by starting the same workflow on the branch (`gh workflow run build.yml --ref <branch>`); branch builds never publish a release. After every push to `main`, `tidy-branches.yml` deletes branches that are fully merged into it.
   - The build posts a short report (test results, warnings, size) as a check annotation, or the tail of the log if it fails. These can be read through the GitHub API.
   - Pushes that only change `docs/` or `README.md` don't trigger a build.
 - **When the version is new,** the workflow publishes a GitHub release tagged `vX.Y.Z`. Its notes are that version's changelog section, and it carries two files: `SteamCollectionTracker.exe` and `SteamCollectionTracker.exe.sha256`. The build stops if the changelog has no entry for the version.

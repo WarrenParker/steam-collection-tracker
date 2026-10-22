@@ -1,0 +1,32 @@
+name: Tidy branches
+
+# After every push to main, delete branches that are already fully merged into
+# it, so finished feature branches don't pile up.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  delete-merged:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Delete merged branches
+        shell: bash
+        run: |
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
+            branch="${ref#origin/}"
+            case "$branch" in main|HEAD|origin) continue ;; esac
+            if git merge-base --is-ancestor "$ref" origin/main; then
+              git push origin --delete "$branch"
+              echo "Deleted $branch (already merged into main)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
