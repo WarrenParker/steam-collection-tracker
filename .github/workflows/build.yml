@@ -1,0 +1,70 @@
+name: Build
+
+# Every push to main builds and tests the Windows app.
+# Pushing a version tag (v0.1.0, v0.2.0, ...) also publishes a release,
+# which is what the app's updater downloads.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      UPDATE_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install interface packages
+        run: npm install
+
+      - name: Build interface
+        run: npm run build
+
+      - name: Run tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build app
+        run: npx tauri build
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src-tauri/target/release/steam-collection-tracker.exe out/SteamCollectionTracker.exe
+          $hash = (Get-FileHash out/SteamCollectionTracker.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path out/SteamCollectionTracker.exe.sha256 -Value $hash -NoNewline
+          $size = [math]::Round((Get-Item out/SteamCollectionTracker.exe).Length / 1MB, 1)
+          "Built SteamCollectionTracker.exe ($size MB), sha256 $hash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SteamCollectionTracker
+          path: out/
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME out/SteamCollectionTracker.exe out/SteamCollectionTracker.exe.sha256 --title "Steam Collection Tracker $env:GITHUB_REF_NAME" --notes-file release-notes.md

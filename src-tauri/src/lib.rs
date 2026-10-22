@@ -1,0 +1,71 @@
+mod commands;
+mod diagnostics;
+mod hexutil;
+mod paths;
+mod profile_input;
+mod scan;
+mod secret;
+mod settings;
+mod state;
+mod steam;
+mod updater;
+
+use std::time::Duration;
+
+use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+pub fn run() {
+    let paths = paths::AppPaths::detect();
+    let settings = settings::Settings::load(&paths.settings_file());
+    let theme = settings.theme;
+    updater::cleanup_leftovers(&paths);
+    let app_state = state::AppState::new(paths.clone(), settings);
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(app_state)
+        .invoke_handler(tauri::generate_handler![
+            commands::app_ready,
+            commands::get_app_info,
+            commands::get_settings,
+            commands::update_preferences,
+            commands::save_api_key,
+            commands::set_profile,
+            commands::run_scan,
+            commands::get_last_scan,
+            commands::get_diagnostics_plan,
+            commands::run_diagnostics,
+            commands::read_report,
+            commands::reveal_report,
+            commands::open_link,
+            commands::get_update_info,
+            commands::check_for_updates,
+            commands::install_update,
+        ])
+        .setup(move |app| {
+            // The window starts hidden and the interface shows it once it has drawn,
+            // so there is no white flash on launch. WebView2's own files go in the
+            // data folder too, keeping everything in one place.
+            let window =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Steam Collection Tracker")
+                    .inner_size(1240.0, 800.0)
+                    .min_inner_size(960.0, 620.0)
+                    .theme(Some(theme.window_theme()))
+                    .visible(false)
+                    .data_directory(paths.webview_dir())
+                    .build()?;
+
+            // Safety net: show the window even if the interface never reports in.
+            let fallback = window.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                let _ = fallback.show();
+            });
+
+            updater::spawn_startup_check(app.handle().clone());
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running Steam Collection Tracker");
+}
