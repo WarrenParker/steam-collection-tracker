@@ -1403,13 +1403,6 @@ fn http_detail(f: &Fetched, depth: usize) -> Value {
     Value::Object(map)
 }
 
-fn result_detail(r: &Result<Fetched, String>, depth: usize) -> Value {
-    match r {
-        Ok(f) => http_detail(f, depth),
-        Err(e) => json!({ "error": e }),
-    }
-}
-
 fn html_detail(f: &Fetched, markers: &[&str]) -> Value {
     let found: Map<String, Value> = markers
         .iter()
@@ -1482,17 +1475,6 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{}…", &s[..end])
 }
 
-fn tail(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut start = s.len() - max;
-    while !s.is_char_boundary(start) {
-        start += 1;
-    }
-    format!("…{}", &s[start..])
-}
-
 fn around(s: &str, index: usize, radius: usize) -> String {
     let mut from = index.saturating_sub(radius);
     while !s.is_char_boundary(from) {
@@ -1546,7 +1528,6 @@ mod tests {
             Some("[[1]")
         );
         assert_eq!(truncate("héllo", 2), "h…");
-        assert_eq!(tail("héllo", 4), "…llo");
         assert_eq!(around("abcdef", 3, 1), "cd");
         assert_eq!(
             count_regex(

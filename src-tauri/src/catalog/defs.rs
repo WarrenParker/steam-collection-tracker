@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use super::{class, CatalogItem};
+use super::{class, image_url, CatalogItem};
 use crate::jsonutil::{flag, int, text};
 
 /// Reads the answer. `None` means it wasn't an item definitions answer at all.
@@ -27,9 +27,11 @@ pub fn parse(v: &Value) -> Option<Vec<CatalogItem>> {
         else {
             continue;
         };
-        let small = text(&d["item_image_small"]);
-        let large = text(&d["item_image_large"]);
-        let composed = text(&d["item_image_composed"]);
+        let appid = int(&d["appid"]).unwrap_or(0).max(0) as u64;
+        let image = |key: &str| text(&d[key]).map(|i| image_url(appid, &i));
+        let small = image("item_image_small");
+        let large = image("item_image_large");
+        let composed = image("item_image_composed");
         let base = CatalogItem {
             class: class_id,
             item_type,
@@ -46,7 +48,7 @@ pub fn parse(v: &Value) -> Option<Vec<CatalogItem>> {
         if class_id == class::CARD {
             let foil = CatalogItem {
                 foil: true,
-                image: text(&d["item_image_composed_foil"])
+                image: image("item_image_composed_foil")
                     .or_else(|| composed.clone())
                     .or_else(|| small.clone()),
                 ..base.clone()

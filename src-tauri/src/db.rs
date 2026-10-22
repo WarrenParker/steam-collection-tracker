@@ -480,7 +480,6 @@ pub fn save_event_apps(c: &Connection, apps: &[(u64, bool)]) -> rusqlite::Result
 #[derive(Debug, Clone)]
 pub struct CatalogTarget {
     pub appid: u64,
-    pub name: Option<String>,
     /// What the store said; `None` when it couldn't tell.
     pub has_cards: Option<bool>,
     /// The user has a badge or card-set items for the game, so it has cards.
@@ -502,7 +501,7 @@ pub fn catalog_targets(
     before: i64,
 ) -> rusqlite::Result<Vec<CatalogTarget>> {
     let sql = format!(
-        "SELECT a.appid, a.name, a.has_cards,
+        "SELECT a.appid, a.has_cards,
              EXISTS (SELECT 1 FROM badges b WHERE b.appid = a.appid)
              OR EXISTS (SELECT 1 FROM inventory i WHERE i.appid = a.appid AND i.class IN (2, 3, 4, 5))
          FROM apps a
@@ -514,9 +513,8 @@ pub fn catalog_targets(
     let rows = st.query_map(params![family, before], |r| {
         Ok(CatalogTarget {
             appid: r.get::<_, i64>(0)? as u64,
-            name: r.get(1)?,
-            has_cards: r.get::<_, Option<i64>>(2)?.map(|v| v != 0),
-            evidence: r.get::<_, i64>(3)? != 0,
+            has_cards: r.get::<_, Option<i64>>(1)?.map(|v| v != 0),
+            evidence: r.get::<_, i64>(2)? != 0,
         })
     })?;
     rows.collect()

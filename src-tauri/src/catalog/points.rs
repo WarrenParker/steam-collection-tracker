@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use super::CatalogItem;
+use super::{image_url, CatalogItem};
 use crate::jsonutil::{flag, int, text};
 
 /// Items per page asked for. Steam pages the answer with a cursor.
@@ -78,8 +78,8 @@ pub fn parse_page(v: &Value) -> Option<PointsPage> {
                 name: text(&data["item_name"]),
                 title: text(&data["item_title"]),
                 description: text(&data["item_description"]),
-                image: text(&data["item_image_small"]),
-                image_large: text(&data["item_image_large"]),
+                image: text(&data["item_image_small"]).map(|i| image_url(appid as u64, &i)),
+                image_large: text(&data["item_image_large"]).map(|i| image_url(appid as u64, &i)),
                 animated,
                 series: None,
                 active: None,
