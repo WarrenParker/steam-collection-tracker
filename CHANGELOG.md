@@ -2,6 +2,13 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.5.1] - 2026-10-22
+
+### Fixed
+
+- Emoticons and backgrounds from a game's card set count as available even when the Points Shop doesn't sell them, since crafting the badge gives them and they're on the Market. DEATHLOOP's twelve were tagged Limited in 0.5.0.
+- Foil cards show the card's picture in a game's details.
+
 ## [0.5.0] - 2026-10-22
 
 ### Added
