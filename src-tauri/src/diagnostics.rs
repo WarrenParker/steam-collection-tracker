@@ -73,7 +73,9 @@ const PLAN: &[(&str, &str)] = &[
     ("achievements", "Achievement progress"),
     ("inventory", "Inventory"),
     ("market_search", "Market items for one game"),
-    ("price_history", "Price history for one item"),
+    ("order_book", "Order book for one item"),
+    ("price_history_new", "Price history for one item"),
+    ("price_history", "Price history, older route"),
     ("store_cards", "Which games have trading cards"),
     ("card_page", "A game's card set page"),
     ("points_catalog", "Points Shop items for a few games"),
@@ -658,8 +660,152 @@ pub async fn run(
         Err(e) => run.finish("market_search", t, StepStatus::Fail, e, Value::Null),
     }
 
-    // 7. Price history: the price history API when signed in, otherwise the
-    // graph data embedded in the item's market page.
+    // 7. The order book from the newer Market: every price level, by item name.
+    let t = run.start("order_book");
+    match sample_hash.as_deref() {
+        None => run.finish(
+            "order_book",
+            t,
+            StepStatus::Skipped,
+            "Skipped because the market search didn't return an item.",
+            Value::Null,
+        ),
+        Some(hash) => match steam.market_book(hash, cookie.as_deref(), notify).await {
+            Ok(f) if f.skipped => run.finish(
+                "order_book",
+                t,
+                StepStatus::Skipped,
+                skipped_text(),
+                Value::Null,
+            ),
+            Ok(f) => {
+                let detail = http_detail(&f, 3);
+                match f
+                    .json()
+                    .as_ref()
+                    .filter(|_| f.is_success())
+                    .and_then(crate::market::parse_book)
+                {
+                    Some(b) => {
+                        let cents = |m: Option<i64>| {
+                            m.map(|m| format!("{:.2}", m as f64 / 1000.0))
+                                .unwrap_or_else(|| "none".to_string())
+                        };
+                        run.finish(
+                            "order_book",
+                            t,
+                            StepStatus::Ok,
+                            format!(
+                                "The order book works for \"{hash}\": {} for sale from {}, best offer to buy {}, in {}.",
+                                fmt_num(b.sell_count.max(0) as u64),
+                                cents(b.sell.first().map(|l| l.0)),
+                                cents(b.buy_max),
+                                crate::market::currency_code(b.currency).unwrap_or("an unknown currency")
+                            ),
+                            detail,
+                        )
+                    }
+                    None => run.finish(
+                        "order_book",
+                        t,
+                        StepStatus::Fail,
+                        format!(
+                            "The order book didn't answer as expected (code {}).",
+                            f.status
+                        ),
+                        detail,
+                    ),
+                }
+            }
+            Err(e) => run.finish("order_book", t, StepStatus::Fail, e, Value::Null),
+        },
+    }
+
+    // 8. Price history from the newer Market, which works without sign-in,
+    // and how much of it comes over the wire.
+    let t = run.start("price_history_new");
+    match sample_hash.as_deref() {
+        None => run.finish(
+            "price_history_new",
+            t,
+            StepStatus::Skipped,
+            "Skipped because the market search didn't return an item.",
+            Value::Null,
+        ),
+        Some(hash) => match steam.market_history(hash, cookie.as_deref(), notify).await {
+            Ok(f) if f.skipped => run.finish(
+                "price_history_new",
+                t,
+                StepStatus::Skipped,
+                skipped_text(),
+                Value::Null,
+            ),
+            Ok(f) => {
+                let mut detail = http_detail(&f, 3);
+                let parsed = f
+                    .json()
+                    .as_ref()
+                    .filter(|_| f.is_success())
+                    .and_then(crate::market::parse_history);
+                let url =
+                    crate::steam::market_action_url("/market/actions", "QueryPriceHistory", hash);
+                let size = steam
+                    .transfer_size(
+                        Bucket::Market,
+                        &url,
+                        cookie.as_deref(),
+                        crate::steam::QUERY_ACTION,
+                    )
+                    .await
+                    .ok();
+                if let (Value::Object(map), Some((status, wire, encoding))) = (&mut detail, &size) {
+                    map.insert("wire_status".into(), json!(status));
+                    map.insert("wire_bytes".into(), json!(wire));
+                    map.insert("wire_encoding".into(), json!(encoding));
+                }
+                match parsed {
+                    Some((currency, points)) => {
+                        let days = crate::market::series::daily(&points).len();
+                        let wire = size
+                            .map(|(_, n, e)| {
+                                format!(
+                                    " {} KB downloaded ({}), {} KB unpacked.",
+                                    n / 1024,
+                                    e.unwrap_or_else(|| "not compressed".to_string()),
+                                    f.body.len() / 1024
+                                )
+                            })
+                            .unwrap_or_default();
+                        run.finish(
+                            "price_history_new",
+                            t,
+                            StepStatus::Ok,
+                            format!(
+                                "Price history works{signed_note}: {} sale points over {} days for \"{hash}\", in {}.{wire}",
+                                fmt_num(points.len() as u64),
+                                fmt_num(days as u64),
+                                crate::market::currency_code(currency).unwrap_or("an unknown currency")
+                            ),
+                            detail,
+                        );
+                    }
+                    None => run.finish(
+                        "price_history_new",
+                        t,
+                        StepStatus::Fail,
+                        format!(
+                            "The price history didn't answer as expected (code {}).",
+                            f.status
+                        ),
+                        detail,
+                    ),
+                }
+            }
+            Err(e) => run.finish("price_history_new", t, StepStatus::Fail, e, Value::Null),
+        },
+    }
+
+    // 9. Price history from the older route, which needs sign-in.
     let t = run.start("price_history");
     match sample_hash.as_deref() {
         None => run.finish(
@@ -716,11 +862,32 @@ pub async fn run(
                                 .unwrap_or(Value::Null),
                         );
                     }
+                    let size = steam
+                        .transfer_size(Bucket::Market, &url, cookie.as_deref(), &[])
+                        .await
+                        .ok();
+                    if let (Value::Object(map), Some((status, wire, encoding))) =
+                        (&mut detail, &size)
+                    {
+                        map.insert("wire_status".into(), json!(status));
+                        map.insert("wire_bytes".into(), json!(wire));
+                        map.insert("wire_encoding".into(), json!(encoding));
+                    }
+                    let wire = size
+                        .map(|(_, n, e)| {
+                            format!(
+                                " {} KB downloaded ({}), {} KB unpacked.",
+                                n / 1024,
+                                e.unwrap_or_else(|| "not compressed".to_string()),
+                                f.body.len() / 1024
+                            )
+                        })
+                        .unwrap_or_default();
                     let (status, text) = if points > 0 {
                         (
                             StepStatus::Ok,
                             format!(
-                                "Price history works signed in: {} data points for \"{hash}\".",
+                                "The older route works signed in: {} data points for \"{hash}\".{wire}",
                                 fmt_num(points as u64)
                             ),
                         )
@@ -738,53 +905,16 @@ pub async fn run(
                 Err(e) => run.finish("price_history", t, StepStatus::Fail, e, Value::Null),
             }
         }
-        Some(hash) => {
-            let mut url = community_url("/market/listings/753", &[]);
-            if let Ok(mut segments) = url.path_segments_mut() {
-                segments.push(hash);
-            }
-            match steam.fetch(Bucket::Market, &url, None, notify).await {
-                Ok(f) if f.skipped => run.finish(
-                    "price_history",
-                    t,
-                    StepStatus::Skipped,
-                    skipped_text(),
-                    Value::Null,
-                ),
-                Ok(f) => {
-                    let line1 = extract_between(&f.body, "var line1=", "];");
-                    let points = line1.map(|s| s.matches("+0\"").count()).unwrap_or(0);
-                    let mut detail = html_detail(&f, &["var line1=", "Market_LoadOrderSpread"]);
-                    if let Value::Object(map) = &mut detail {
-                        map.insert("item".into(), json!(hash));
-                        map.insert("price_points".into(), json!(points));
-                        map.insert(
-                            "first_points".into(),
-                            json!(line1.map(|s| truncate(s, 200))),
-                        );
-                    }
-                    let (status, text) = if points > 0 {
-                        (
-                            StepStatus::Ok,
-                            format!("Price history works without sign-in: {} data points for \"{hash}\".", fmt_num(points as u64)),
-                        )
-                    } else {
-                        (
-                            StepStatus::Warn,
-                            format!(
-                                "No price history was found on the item's page (code {}).",
-                                f.status
-                            ),
-                        )
-                    };
-                    run.finish("price_history", t, status, text, detail);
-                }
-                Err(e) => run.finish("price_history", t, StepStatus::Fail, e, Value::Null),
-            }
-        }
+        Some(_) => run.finish(
+            "price_history",
+            t,
+            StepStatus::Skipped,
+            "Needs Steam sign-in. The newer route above works without it.",
+            Value::Null,
+        ),
     }
 
-    // 9. The store check: which games have trading cards.
+    // 10. The store check: which games have trading cards.
     let t = run.start("store_cards");
     let mut check: Vec<u64> = vec![sample_app];
     check.extend(

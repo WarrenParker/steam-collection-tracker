@@ -2,8 +2,10 @@
   import { onMount, tick } from 'svelte';
   import {
     api,
+    CURRENCIES,
     errorText,
     type AppInfo,
+    type PriceWindow,
     type SettingsView,
     type SignInResult,
     type Theme,
@@ -29,6 +31,26 @@
     onclose: () => void;
     onchange: (s: SettingsView) => void;
   } = $props();
+
+  const windows: { value: PriceWindow; label: string }[] = [
+    { value: 'month', label: '30 days' },
+    { value: 'quarter', label: '90 days' },
+    { value: 'year', label: '1 year' },
+    { value: 'all', label: 'All time' },
+  ];
+  const percents = [10, 15, 20, 25, 30, 40, 50, 75, 100];
+  const minimums = [0, 1, 2, 5, 10, 25, 50, 100];
+  const currencyNames = (() => {
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'currency' });
+    } catch {
+      return null;
+    }
+  })();
+  const currencies = CURRENCIES.map((code) => ({
+    code,
+    label: `${code} · ${currencyNames?.of(code) ?? code}`,
+  })).sort((a, b) => (a.code === 'USD' ? -1 : b.code === 'USD' ? 1 : a.code.localeCompare(b.code)));
 
   const themes: { value: Theme; label: string }[] = [
     { value: 'greyscale', label: 'Greyscale' },
@@ -94,6 +116,20 @@
       onchange(await api.updatePreferences({ keep_card_set: !settings.keep_card_set }));
     } catch (e) {
       error = errorText(e);
+    }
+  }
+
+  let priceBusy = $state(false);
+
+  async function setPrices(patch: Parameters<typeof api.updatePriceSettings>[0]) {
+    priceBusy = true;
+    error = '';
+    try {
+      onchange(await api.updatePriceSettings(patch));
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      priceBusy = false;
     }
   }
 
@@ -312,6 +348,79 @@
           aria-label="Also need the cards in my inventory"
           onclick={toggleKeepSet}
         ></button>
+      </div>
+    </section>
+
+    <section class="setting-group">
+      <h3>Prices</h3>
+      <div class="setting-row">
+        <div>
+          <div>Currency</div>
+          <div class="desc">
+            Steam reports prices in your account's currency. Other currencies are converted with daily exchange rates.
+          </div>
+        </div>
+        <select
+          class="mini-select setting-select"
+          aria-label="Currency"
+          value={settings.currency}
+          disabled={priceBusy}
+          onchange={(e) => setPrices({ currency: (e.currentTarget as HTMLSelectElement).value })}
+        >
+          {#each currencies as c (c.code)}
+            <option value={c.code}>{c.label}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div>Average price over</div>
+          <div class="desc">The span used for each item's average price, and for spotting spikes and dips.</div>
+        </div>
+        <select
+          class="mini-select setting-select"
+          aria-label="Average price over"
+          value={settings.price_window}
+          disabled={priceBusy}
+          onchange={(e) => setPrices({ price_window: (e.currentTarget as HTMLSelectElement).value as PriceWindow })}
+        >
+          {#each windows as w (w.value)}
+            <option value={w.value}>{w.label}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div>Spike and dip sensitivity</div>
+          <div class="desc">
+            An item is tagged Price spike or Price dip when today's cheapest listing is this far from its average,
+            and by at least the amount on the right, so cheap items don't flicker.
+          </div>
+        </div>
+        <div class="setting-pair">
+          <select
+            class="mini-select"
+            aria-label="Percent from the average"
+            value={settings.spike_percent}
+            disabled={priceBusy}
+            onchange={(e) => setPrices({ spike_percent: Number((e.currentTarget as HTMLSelectElement).value) })}
+          >
+            {#each percents as p (p)}
+              <option value={p}>{p}%</option>
+            {/each}
+          </select>
+          <select
+            class="mini-select"
+            aria-label="Least change"
+            value={settings.spike_min_cents}
+            disabled={priceBusy}
+            onchange={(e) => setPrices({ spike_min_cents: Number((e.currentTarget as HTMLSelectElement).value) })}
+          >
+            {#each minimums as m (m)}
+              <option value={m}>{m === 0 ? 'any amount' : `${m}¢ or more`}</option>
+            {/each}
+          </select>
+        </div>
       </div>
     </section>
 

@@ -11,10 +11,15 @@ export interface ProfileView {
   is_public: boolean;
 }
 
+export type PriceWindow = 'month' | 'quarter' | 'year' | 'all';
+
 export interface SettingsView {
   theme: Theme;
   auto_update: boolean;
   currency: string;
+  price_window: PriceWindow;
+  spike_percent: number;
+  spike_min_cents: number;
   profile: ProfileView | null;
   has_api_key: boolean;
   api_key_hint: string | null;
@@ -104,6 +109,8 @@ export interface ScanStatus {
   remaining: number;
   remaining_seconds: number | null;
   resume_at: number | null;
+  prices_remaining: number;
+  prices_seconds: number | null;
   message: string | null;
   pause_requested: boolean;
 }
@@ -129,6 +136,11 @@ export interface GameRow {
   complete_items: number;
   counted_items: number;
   cards_complete: boolean;
+  /** Mills (thousandths) of the shown currency. */
+  value: number | null;
+  cost: number | null;
+  cost_points: number;
+  currency: string;
 }
 
 export type Availability = 'available' | 'limited' | 'unobtainable';
@@ -157,6 +169,70 @@ export interface ItemView {
   note: string | null;
   overridden: boolean;
   tags: string[];
+  price: ItemPrice | null;
+  sellable: number;
+  value: number | null;
+  cost: number | null;
+  cost_estimated: boolean;
+  cost_points: number | null;
+  alt_points: number | null;
+  unpriced: boolean;
+}
+
+/** Prices are in mills: thousandths of the shown currency's main unit. */
+export interface ItemPrice {
+  hash_name: string;
+  on_market: boolean;
+  lowest: number | null;
+  listings: number;
+  average: number | null;
+  change: number | null;
+  avg_30: number | null;
+  avg_90: number | null;
+  avg_365: number | null;
+  avg_all: number | null;
+  low: number | null;
+  low_at: number | null;
+  high: number | null;
+  high_at: number | null;
+  sales_30: number | null;
+  buy_max: number | null;
+  seen_at: number;
+  history_at: number | null;
+  book_at: number | null;
+}
+
+export interface PriceTotals {
+  value: number;
+  value_copies: number;
+  value_unpriced: number;
+  points_value: number;
+  cost: number;
+  cost_items: number;
+  cost_estimated: number;
+  cost_points: number;
+  cost_points_items: number;
+  alt_points: number;
+  alt_money: number;
+  alt_items: number;
+  unpriced: number;
+  spikes: number;
+  dips: number;
+  marketable: number;
+  with_history: number;
+}
+
+export interface ChartPoint {
+  t: number;
+  price: number;
+  volume: number;
+}
+
+export interface PriceHistory {
+  points: ChartPoint[];
+  full: boolean;
+  currency: string;
+  read_at: number | null;
 }
 
 export interface GroupProgress {
@@ -182,6 +258,7 @@ export interface GameCompletion {
   has_cards: boolean;
   cards_complete: boolean;
   counts_for_account: boolean;
+  prices: PriceTotals;
 }
 
 export interface AccountCompletion {
@@ -201,11 +278,16 @@ export interface AccountCompletion {
   limited: number;
   keep_card_set: boolean;
   include_family: boolean;
+  prices: PriceTotals;
+  currency: string;
+  currency_note: string | null;
+  prices_at: number | null;
 }
 
 export interface GameDetail {
   completion: GameCompletion | null;
   items: ItemView[];
+  currency: string;
 }
 
 export type StepStatus = 'pending' | 'running' | 'ok' | 'warn' | 'fail' | 'skipped';
@@ -279,6 +361,14 @@ export const api = {
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),
+  priceHistory: (hashName: string, full = false) =>
+    invoke<PriceHistory>('get_price_history', { hashName, full }),
+  updatePriceSettings: (patch: {
+    currency?: string;
+    price_window?: PriceWindow;
+    spike_percent?: number;
+    spike_min_cents?: number;
+  }) => invoke<SettingsView>('update_price_settings', { patch }),
   diagnosticsPlan: () => invoke<DiagStep[]>('get_diagnostics_plan'),
   runDiagnostics: () => invoke<DiagnosticsResult>('run_diagnostics'),
   readReport: (path: string) => invoke<string>('read_report', { path }),
@@ -309,4 +399,14 @@ export const links = {
   store: (appid: number) => `https://store.steampowered.com/app/${appid}/`,
   cards: (steamId: string, appid: number) =>
     `https://steamcommunity.com/profiles/${steamId}/gamecards/${appid}/`,
+  market: (hashName: string) =>
+    `https://steamcommunity.com/market/listings/753/${encodeURIComponent(hashName)}`,
 };
+
+/** Currencies Steam uses, by code. */
+export const CURRENCIES = [
+  'USD', 'GBP', 'EUR', 'CHF', 'RUB', 'PLN', 'BRL', 'JPY', 'NOK', 'IDR', 'MYR', 'PHP', 'SGD', 'THB',
+  'VND', 'KRW', 'TRY', 'UAH', 'MXN', 'CAD', 'AUD', 'NZD', 'CNY', 'INR', 'CLP', 'PEN', 'COP', 'ZAR',
+  'HKD', 'TWD', 'SAR', 'AED', 'SEK', 'ARS', 'ILS', 'BYN', 'KZT', 'KWD', 'QAR', 'CRC', 'UYU', 'BGN',
+  'CZK', 'DKK', 'HUF', 'RON',
+] as const;

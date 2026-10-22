@@ -18,7 +18,7 @@ use crate::steam::inventory::InvRow;
 use crate::steam::{Badge, OwnedGame};
 
 pub const FILE_NAME: &str = "collection.db";
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// The app's own "game" for Steam-wide items such as gems.
 pub const STEAM_APP: i64 = 753;
@@ -156,6 +156,52 @@ PRAGMA user_version = 3;
 COMMIT;
 ";
 
+/// 0.6.0: Market prices. One row per item Steam lists on the Market, with its
+/// cheapest listing, a summary of its price history and a compact recent
+/// stretch of it, and its order book. Games record when their Market search
+/// last finished.
+const MIGRATE_V4: &str = "
+BEGIN;
+ALTER TABLE apps ADD COLUMN market_checked_at INTEGER;
+CREATE TABLE market (
+    hash_name        TEXT PRIMARY KEY,
+    appid            INTEGER NOT NULL,
+    class            INTEGER NOT NULL,
+    foil             INTEGER NOT NULL DEFAULT 0,
+    name             TEXT NOT NULL,
+    type_label       TEXT,
+    icon             TEXT,
+    currency         INTEGER NOT NULL DEFAULT 0,
+    lowest           INTEGER,
+    listings         INTEGER NOT NULL DEFAULT 0,
+    seen_at          INTEGER NOT NULL,
+    history_at       INTEGER,
+    history_due      INTEGER,
+    history_currency INTEGER,
+    avg_30           INTEGER,
+    avg_90           INTEGER,
+    avg_365          INTEGER,
+    avg_all          INTEGER,
+    low_price        INTEGER,
+    low_day          INTEGER,
+    high_price       INTEGER,
+    high_day         INTEGER,
+    sales_30         INTEGER,
+    first_day        INTEGER,
+    last_day         INTEGER,
+    recent           BLOB,
+    book_at          INTEGER,
+    book_currency    INTEGER,
+    book             TEXT,
+    buy_max          INTEGER,
+    sell_count       INTEGER,
+    buy_count        INTEGER
+);
+CREATE INDEX market_by_app ON market (appid, class);
+PRAGMA user_version = 4;
+COMMIT;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -190,6 +236,8 @@ impl Db {
         conn.execute_batch(MIGRATE_V2)
             .expect("the migration is valid");
         conn.execute_batch(MIGRATE_V3)
+            .expect("the migration is valid");
+        conn.execute_batch(MIGRATE_V4)
             .expect("the migration is valid");
         Self {
             conn: Mutex::new(conn),
@@ -231,6 +279,9 @@ fn try_open(path: &Path) -> Result<Connection, String> {
     }
     if version < 3 {
         conn.execute_batch(MIGRATE_V3).map_err(|e| e.to_string())?;
+    }
+    if version < 4 {
+        conn.execute_batch(MIGRATE_V4).map_err(|e| e.to_string())?;
     }
     Ok(conn)
 }
@@ -719,6 +770,315 @@ pub fn save_catalog_error(c: &Connection, appid: u64, error: &str) -> rusqlite::
     Ok(())
 }
 
+// ---- Market prices ------------------------------------------------------------
+
+/// Kinds of item the Market search records against the catalog.
+const MARKET_CLASSES: &str = "(2, 3, 4, 5)";
+
+/// Games whose Market prices are missing or older than `before`: card games
+/// that count for the account, and any game the user holds an item they could
+/// sell from (so account value covers the whole inventory). Owned games first.
+pub fn market_targets(c: &Connection, family: bool, before: i64) -> rusqlite::Result<Vec<u64>> {
+    appids(
+        c,
+        "SELECT a.appid FROM apps a
+         WHERE (a.market_checked_at IS NULL OR a.market_checked_at < ?2)
+           AND ((a.appid <> 753 AND COALESCE(a.has_cards, 0) = 1
+                 AND (a.owned = 1 OR (a.family = 1 AND ?1)))
+             OR a.appid IN (SELECT v.appid FROM inventory v
+                            WHERE v.marketable = 1 AND v.appid IS NOT NULL))
+         ORDER BY a.owned DESC, a.appid",
+        family,
+        before,
+    )
+}
+
+/// Makes sure every game the user holds a sellable item from has a row, so
+/// its Market search can be recorded (Steam's own items use game 753).
+pub fn ensure_inventory_apps(c: &Connection) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO apps (appid)
+         SELECT DISTINCT appid FROM inventory WHERE marketable = 1 AND appid IS NOT NULL",
+        (),
+    )?;
+    Ok(())
+}
+
+/// Roughly how many Market items a game has, for time estimates.
+pub fn market_item_estimate(c: &Connection, appid: u64) -> rusqlite::Result<u64> {
+    let n: i64 = c.query_row(
+        &format!(
+            "SELECT MAX(
+                 (SELECT COUNT(*) FROM market m WHERE m.appid = ?1),
+                 (SELECT COUNT(*) FROM items i WHERE i.appid = ?1 AND i.class IN {MARKET_CLASSES}
+                      AND (i.class IN (2, 5) OR i.in_points = 0 OR i.animated = 0)))"
+        ),
+        [appid as i64],
+        |r| r.get(0),
+    )?;
+    Ok(n.max(1) as u64)
+}
+
+/// Saves one page of a Market search.
+pub fn save_market_page(
+    c: &Connection,
+    listings: &[crate::market::Listing],
+    currency: i64,
+    seen_at: i64,
+) -> rusqlite::Result<()> {
+    let mut st = c.prepare(
+        "INSERT INTO market (hash_name, appid, class, foil, name, type_label, icon, currency, lowest, listings, seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT (hash_name) DO UPDATE SET
+             appid = excluded.appid, class = excluded.class, foil = excluded.foil,
+             name = excluded.name, type_label = excluded.type_label,
+             icon = COALESCE(excluded.icon, icon), currency = excluded.currency,
+             lowest = excluded.lowest, listings = excluded.listings, seen_at = excluded.seen_at",
+    )?;
+    for l in listings {
+        st.execute(params![
+            l.hash_name,
+            l.appid as i64,
+            l.class,
+            i64::from(l.foil),
+            l.name,
+            l.type_label,
+            l.icon,
+            currency,
+            l.lowest,
+            l.listings,
+            seen_at,
+        ])?;
+    }
+    Ok(())
+}
+
+/// Records that a game's Market search finished. Items it didn't list since
+/// `started` aren't for sale right now.
+pub fn finish_market_app(c: &Connection, appid: u64, started: i64) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO apps (appid, market_checked_at) VALUES (?1, ?2)
+         ON CONFLICT (appid) DO UPDATE SET market_checked_at = excluded.market_checked_at",
+        params![appid as i64, started],
+    )?;
+    Ok(())
+}
+
+/// Market items in games that count for the account whose price history is
+/// missing or due, owned games first.
+pub fn history_targets(c: &Connection, family: bool, now: i64) -> rusqlite::Result<Vec<String>> {
+    let mut st = c.prepare(&format!(
+        "SELECT m.hash_name FROM market m JOIN apps a ON a.appid = m.appid
+         WHERE m.class IN {MARKET_CLASSES}
+           AND (a.owned = 1 OR (a.family = 1 AND ?1))
+           AND (m.history_due IS NULL OR m.history_due <= ?2)
+         ORDER BY a.owned DESC, m.history_at IS NOT NULL, m.appid, m.hash_name"
+    ))?;
+    let rows = st.query_map(params![family, now], |r| r.get::<_, String>(0))?;
+    rows.collect()
+}
+
+/// Whether the Market lists an item by this name.
+pub fn market_has(c: &Connection, hash_name: &str) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM market WHERE hash_name = ?1)",
+        [hash_name],
+        |r| r.get(0),
+    )
+}
+
+/// Items in games that count whose price history hasn't been read yet.
+pub fn history_missing(c: &Connection, family: bool) -> rusqlite::Result<u64> {
+    let n: i64 = c.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM market m JOIN apps a ON a.appid = m.appid
+             WHERE m.class IN {MARKET_CLASSES} AND m.history_at IS NULL
+               AND (a.owned = 1 OR (a.family = 1 AND ?1))"
+        ),
+        [family],
+        |r| r.get(0),
+    )?;
+    Ok(n.max(0) as u64)
+}
+
+/// Whether any item has a price history yet.
+pub fn has_any_history(c: &Connection) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM market WHERE history_at IS NOT NULL)",
+        (),
+        |r| r.get(0),
+    )
+}
+
+pub struct HistorySave<'a> {
+    pub currency: i64,
+    pub summary: &'a crate::market::series::Summary,
+    pub recent: &'a [u8],
+    pub due: i64,
+}
+
+pub fn save_history(
+    c: &Connection,
+    hash_name: &str,
+    h: &HistorySave<'_>,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let s = h.summary;
+    c.execute(
+        "UPDATE market SET history_at = ?2, history_due = ?3, history_currency = ?4,
+             avg_30 = ?5, avg_90 = ?6, avg_365 = ?7, avg_all = ?8,
+             low_price = ?9, low_day = ?10, high_price = ?11, high_day = ?12,
+             sales_30 = ?13, first_day = ?14, last_day = ?15, recent = ?16
+         WHERE hash_name = ?1",
+        params![
+            hash_name,
+            now,
+            h.due,
+            h.currency,
+            s.avg_30,
+            s.avg_90,
+            s.avg_365,
+            s.avg_all,
+            s.low.map(|l| l.0),
+            s.low.map(|l| l.1),
+            s.high.map(|l| l.0),
+            s.high.map(|l| l.1),
+            s.sales_30,
+            s.first_day,
+            s.last_day,
+            h.recent,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Tries an item's history again later, when Steam's answer couldn't be read.
+pub fn postpone_history(c: &Connection, hash_name: &str, due: i64) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE market SET history_due = ?2 WHERE hash_name = ?1",
+        params![hash_name, due],
+    )?;
+    Ok(())
+}
+
+/// The stored recent history and its currency.
+pub fn recent_history(c: &Connection, hash_name: &str) -> rusqlite::Result<Option<(Vec<u8>, i64)>> {
+    c.query_row(
+        "SELECT recent, COALESCE(history_currency, currency) FROM market
+         WHERE hash_name = ?1 AND recent IS NOT NULL",
+        [hash_name],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()
+}
+
+pub fn save_book(
+    c: &Connection,
+    hash_name: &str,
+    b: &crate::market::book::Book,
+    now: i64,
+) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE market SET book_at = ?2, book_currency = ?3, book = ?4, buy_max = ?5,
+             sell_count = ?6, buy_count = ?7
+         WHERE hash_name = ?1",
+        params![
+            hash_name,
+            now,
+            b.currency,
+            crate::market::book::to_text(&b.sell),
+            b.buy_max,
+            b.sell_count,
+            b.buy_count,
+        ],
+    )?;
+    Ok(())
+}
+
+/// A Market item as completion reads it. Prices are in mills of `currency`.
+#[derive(Clone, Debug, Default)]
+pub struct MarketRow {
+    pub hash_name: String,
+    pub appid: u64,
+    pub class: i64,
+    pub foil: bool,
+    pub name: String,
+    pub icon: Option<String>,
+    pub currency: i64,
+    pub lowest: Option<i64>,
+    pub listings: i64,
+    pub seen_at: i64,
+    pub history_at: Option<i64>,
+    pub history_currency: Option<i64>,
+    pub avg_30: Option<i64>,
+    pub avg_90: Option<i64>,
+    pub avg_365: Option<i64>,
+    pub avg_all: Option<i64>,
+    pub low_price: Option<i64>,
+    pub low_day: Option<i64>,
+    pub high_price: Option<i64>,
+    pub high_day: Option<i64>,
+    pub sales_30: Option<i64>,
+    pub book_at: Option<i64>,
+    pub book_currency: Option<i64>,
+    pub book: Option<String>,
+    pub buy_max: Option<i64>,
+}
+
+pub fn market_rows(c: &Connection) -> rusqlite::Result<Vec<MarketRow>> {
+    let mut st = c.prepare(
+        "SELECT hash_name, appid, class, foil, name, icon, currency, lowest, listings, seen_at,
+             history_at, history_currency, avg_30, avg_90, avg_365, avg_all,
+             low_price, low_day, high_price, high_day, sales_30,
+             book_at, book_currency, book, buy_max
+         FROM market",
+    )?;
+    let rows = st.query_map((), |r| {
+        Ok(MarketRow {
+            hash_name: r.get(0)?,
+            appid: r.get::<_, i64>(1)? as u64,
+            class: r.get(2)?,
+            foil: r.get::<_, i64>(3)? != 0,
+            name: r.get(4)?,
+            icon: r.get(5)?,
+            currency: r.get(6)?,
+            lowest: r.get(7)?,
+            listings: r.get(8)?,
+            seen_at: r.get(9)?,
+            history_at: r.get(10)?,
+            history_currency: r.get(11)?,
+            avg_30: r.get(12)?,
+            avg_90: r.get(13)?,
+            avg_365: r.get(14)?,
+            avg_all: r.get(15)?,
+            low_price: r.get(16)?,
+            low_day: r.get(17)?,
+            high_price: r.get(18)?,
+            high_day: r.get(19)?,
+            sales_30: r.get(20)?,
+            book_at: r.get(21)?,
+            book_currency: r.get(22)?,
+            book: r.get(23)?,
+            buy_max: r.get(24)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Sellable copies of Steam's own items (game 753, like sacks of gems), by
+/// Market name, for the account's value.
+pub fn steam_item_copies(c: &Connection) -> rusqlite::Result<Vec<(String, u64)>> {
+    let mut st = c.prepare(
+        "SELECT market_hash_name, SUM(quantity) FROM inventory
+         WHERE appid = 753 AND marketable = 1 AND market_hash_name IS NOT NULL
+         GROUP BY market_hash_name",
+    )?;
+    let rows = st.query_map((), |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u64))
+    })?;
+    rows.collect()
+}
+
 // ---- Meta values ------------------------------------------------------------
 
 pub fn get_meta(c: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
@@ -935,6 +1295,13 @@ pub struct GameRow {
     pub complete_items: u64,
     pub counted_items: u64,
     pub cards_complete: bool,
+    /// What the copies the user can sell are worth, in mills of the shown currency.
+    pub value: Option<i64>,
+    /// Money and points still needed to finish the game.
+    pub cost: Option<i64>,
+    pub cost_points: i64,
+    /// The currency `value` and `cost` are in.
+    pub currency: String,
 }
 
 pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
@@ -977,6 +1344,10 @@ pub fn games(c: &Connection, family: bool) -> rusqlite::Result<Vec<GameRow>> {
             complete_items: 0,
             counted_items: 0,
             cards_complete: false,
+            value: None,
+            cost: None,
+            cost_points: 0,
+            currency: String::new(),
         })
     })?;
     rows.collect()

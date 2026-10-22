@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, errorText, on, type GameRow, type ScanStatus } from './api';
-  import { num, pct } from './format';
+  import { money, num, pct } from './format';
   import GameDetail from './GameDetail.svelte';
 
   let { steamId }: { steamId: string | null } = $props();
 
   type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'items' | 'cards' | 'complete';
-  type SortKey = 'name' | 'complete' | 'cards' | 'items' | 'yours' | 'badge' | 'achievements';
+  type SortKey = 'name' | 'complete' | 'cards' | 'items' | 'yours' | 'value' | 'cost' | 'badge' | 'achievements';
 
   const filters: { value: Filter; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -69,6 +69,11 @@
           return g.items;
         case 'yours':
           return g.your_items;
+        case 'value':
+          return g.value ?? -1;
+        case 'cost':
+          // Money first; points-only costs sort after every money cost.
+          return g.cost !== null ? g.cost : g.cost_points > 0 ? 1e12 + g.cost_points : -1;
         case 'badge':
           return (g.badge_level ?? -1) + (g.foil_badge ? 0.5 : 0);
         case 'achievements':
@@ -198,6 +203,16 @@
           <th class="num" aria-sort={ariaSort('yours')}>
             <button onclick={() => sortBy('yours')} title="Items for this game in your inventory">Yours</button>
           </th>
+          <th class="num" aria-sort={ariaSort('value')}>
+            <button onclick={() => sortBy('value')} title="What your items you could sell are worth, before Steam's fees">
+              Value
+            </button>
+          </th>
+          <th class="num" aria-sort={ariaSort('cost')}>
+            <button onclick={() => sortBy('cost')} title="What the rest costs: Market items in money, Points Shop-only items in points">
+              To complete
+            </button>
+          </th>
           <th class="num" aria-sort={ariaSort('badge')}>
             <button onclick={() => sortBy('badge')}>Badge</button>
           </th>
@@ -226,6 +241,12 @@
             <td class="num">{g.cards ? num(g.cards) : g.has_cards === false ? '–' : ''}</td>
             <td class="num">{g.items ? num(g.items) : ''}</td>
             <td class="num">{g.your_items ? num(g.your_items) : ''}</td>
+            <td class="num">{g.value !== null ? money(g.value, g.currency) : ''}</td>
+            <td class="num">
+              {#if g.cost !== null}{g.cost === 0 && g.cost_points === 0 ? 'Done' : money(g.cost, g.currency)}{/if}{#if g.cost_points > 0}<span
+                  class="pts">{g.cost !== null && g.cost > 0 ? ' + ' : ''}{num(g.cost_points)} pts</span
+                >{/if}
+            </td>
             <td class="num">
               {#if g.badge_level}Level {g.badge_level}{/if}
               {#if g.foil_badge}<span class="foil-dot" title="Foil badge"></span>{/if}

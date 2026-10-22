@@ -65,6 +65,52 @@ export function owned(n: number): string {
   return n % 1 === 0 ? num(n) : n.toLocaleString('en-US', { maximumFractionDigits: 1 });
 }
 
+const moneyFormats = new Map<string, Intl.NumberFormat>();
+
+/** Money from mills (thousandths of the main unit), like "$12.34". */
+export function money(mills: number | null | undefined, currency: string): string {
+  if (mills === null || mills === undefined) return '–';
+  let f = moneyFormats.get(currency);
+  if (!f) {
+    try {
+      f = new Intl.NumberFormat('en-US', { style: 'currency', currency });
+    } catch {
+      f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    moneyFormats.set(currency, f);
+  }
+  return f.format(mills / 1000);
+}
+
+/** "12,500 points". */
+export function points(n: number): string {
+  return `${num(n)} ${n === 1 ? 'point' : 'points'}`;
+}
+
+/** "+32%" or "−18%". */
+export function change(pctValue: number | null | undefined): string {
+  if (pctValue === null || pctValue === undefined) return '';
+  const rounded = Math.round(pctValue);
+  return `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)}%`;
+}
+
+/** "Mar 4, 2021" for a Unix time. */
+export function day(unixSeconds: number | null | undefined): string {
+  if (!unixSeconds) return '';
+  return new Date(unixSeconds * 1000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** "3 hours ago" for a Unix time. */
+export function agoUnix(unixSeconds: number | null | undefined): string {
+  if (!unixSeconds) return '';
+  return ago(new Date(unixSeconds * 1000).toISOString());
+}
+
 export function bytes(n: number): string {
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;

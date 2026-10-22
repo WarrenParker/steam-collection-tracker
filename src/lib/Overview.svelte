@@ -11,7 +11,7 @@
     type ScanSummary,
     type SettingsView,
   } from './api';
-  import { ago, clock, duration, num, owned, pct, roughly } from './format';
+  import { ago, agoUnix, clock, duration, money, num, owned, pct, points, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
@@ -20,12 +20,14 @@
     signedIn,
     includeFamily,
     keepCardSet,
+    priceKey = '',
     onprofile,
     onsettings,
   }: {
     signedIn: boolean;
     includeFamily: boolean;
     keepCardSet: boolean;
+    priceKey?: string;
     onprofile: (p: ProfileView) => void;
     onsettings: (s: SettingsView) => void;
   } = $props();
@@ -41,10 +43,12 @@
 
   // Each stage's share of the progress bar.
   const STAGES: Record<number, [number, number]> = {
-    1: [0, 15],
-    2: [15, 25],
-    3: [25, 35],
-    4: [35, 100],
+    1: [0, 8],
+    2: [8, 12],
+    3: [12, 16],
+    4: [16, 45],
+    5: [45, 65],
+    6: [65, 100],
   };
 
   const running = $derived(status?.state === 'running');
@@ -52,11 +56,14 @@
   const canContinue = $derived(
     !!status &&
       !running &&
-      status.remaining > 0 &&
+      (status.remaining > 0 || status.prices_remaining > 0) &&
       (status.state === 'paused' ||
         status.state === 'waiting' ||
         (status.state === 'idle' && !!catalog && catalog.games_cataloged > 0)),
   );
+  const prices = $derived(completion?.prices ?? null);
+  const cur = $derived(completion?.currency ?? 'USD');
+  const hasPrices = $derived(!!completion && completion.prices_at !== null);
   const percent = $derived.by(() => {
     if (!status || !running) return 0;
     const [from, to] = STAGES[status.stage] ?? [0, 5];
@@ -66,7 +73,9 @@
   const progressText = $derived.by(() => {
     if (!status || !running) return '';
     const parts = [status.label || 'Scanning…'];
-    if (status.stage === 4 && status.total > 0) parts.push(`${num(status.done)} of ${num(status.total)} games`);
+    if ((status.stage === 4 || status.stage === 5) && status.total > 0)
+      parts.push(`${num(status.done)} of ${num(status.total)} games`);
+    if (status.stage === 6 && status.total > 0) parts.push(`${num(status.done)} of ${num(status.total)} items`);
     if (status.seconds_left !== null && status.seconds_left > 0) parts.push(`${roughly(status.seconds_left)} left`);
     return parts.join(' · ');
   });
@@ -90,6 +99,7 @@
   $effect(() => {
     void includeFamily;
     void keepCardSet;
+    void priceKey;
     loadCompletion();
   });
 
@@ -194,10 +204,17 @@
     <div class="notice warn" role="status">
       <Icon name="alert" />
       <p>
-        The last scan didn't finish. {num(status.remaining)}
-        {status.remaining === 1 ? 'game still needs' : 'games still need'} an item list{status.remaining_seconds
-          ? `, which takes ${roughly(status.remaining_seconds)}`
-          : ''}.
+        {#if status.remaining > 0}
+          The last scan didn't finish. {num(status.remaining)}
+          {status.remaining === 1 ? 'game still needs' : 'games still need'} an item list{status.remaining_seconds
+            ? `, which takes ${roughly(status.remaining_seconds)}`
+            : ''}.
+        {:else}
+          The last scan didn't finish. {num(status.prices_remaining)}
+          {status.prices_remaining === 1 ? 'item still needs its' : 'items still need their'} price history{status.prices_seconds
+            ? `, which takes ${roughly(status.prices_seconds)}`
+            : ''}.
+        {/if}
       </p>
     </div>
   {/if}
@@ -330,6 +347,72 @@
       </section>
     {/if}
 
+    {#if hasPrices && prices && completion}
+      <section class="block">
+        <div class="split">
+          <section>
+            <h2>Value</h2>
+            <div class="collection-head">
+              <div class="collection-percent money">{money(prices.value, cur)}</div>
+              <p class="section-note">
+                What the {num(prices.value_copies)} items you could sell are worth at today's cheapest listings,
+                before Steam's fees.
+              </p>
+            </div>
+            <dl class="facts">
+              <dt title="Items you hold that can't be sold, such as Points Shop purchases, at their Points Shop price">
+                Points value
+              </dt>
+              <dd>{points(prices.points_value)}</dd>
+              {#if prices.value_unpriced > 0}
+                <dt title="Items you could sell that nobody has listed or sold lately">Sellable, no price yet</dt>
+                <dd>{num(prices.value_unpriced)}</dd>
+              {/if}
+              {#if prices.spikes > 0 || prices.dips > 0}
+                <dt title="Today's cheapest listing compared with the average price. Change the sensitivity in Settings.">
+                  Price spikes and dips
+                </dt>
+                <dd>{num(prices.spikes)} up, {num(prices.dips)} down</dd>
+              {/if}
+            </dl>
+          </section>
+
+          <section>
+            <h2>Cost to complete</h2>
+            <dl class="facts">
+              <dt title="Everything still needed that the Market sells, buying the cheapest copies first">On the Market</dt>
+              <dd>{money(prices.cost, cur)}</dd>
+              <dt title="Items only the Points Shop sells">In the Points Shop</dt>
+              <dd>{points(prices.cost_points)}</dd>
+              {#if prices.unpriced > 0}
+                <dt title="Still needed, but nobody is selling them right now">Not for sale right now</dt>
+                <dd>{num(prices.unpriced)} {prices.unpriced === 1 ? 'item' : 'items'}</dd>
+              {/if}
+            </dl>
+            {#if prices.alt_items > 0}
+              <p class="section-note small-note">
+                Or buy {num(prices.alt_items)} of those items in the Points Shop for {points(prices.alt_points)}
+                instead of {money(prices.alt_money, cur)}.
+              </p>
+            {/if}
+            {#if prices.cost_estimated > 0}
+              <p class="section-note small-note">
+                {num(prices.cost_estimated)} {prices.cost_estimated === 1 ? 'card is' : 'cards are'} estimated at today's
+                cheapest listing until {prices.cost_estimated === 1 ? 'its order book is' : 'their order books are'} read.
+              </p>
+            {/if}
+            <p class="section-note small-note">
+              Prices from {agoUnix(completion.prices_at)}. Price history read for {num(prices.with_history)} of
+              {num(prices.marketable)} items.
+            </p>
+            {#if completion.currency_note}
+              <p class="section-note small-note">{completion.currency_note}</p>
+            {/if}
+          </section>
+        </div>
+      </section>
+    {/if}
+
     {#if catalog}
       <section class="block">
         <div class="split">
@@ -447,6 +530,7 @@
   <Diagnostics />
 
   <p class="phase-note">
-    This is an early version. Prices, account value and cost to complete arrive in the next version.
+    This is an early version. Prices are new: the dashboard, sortable item lists and price charts arrive in the
+    next version.
   </p>
 </div>

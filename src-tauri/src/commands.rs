@@ -9,10 +9,11 @@ use crate::completion::{self, AccountCompletion, Availability, GameCompletion, I
 use crate::db::{self, GameRow};
 use crate::diagnostics::{self, DiagStep, DiagnosticsResult};
 use crate::housekeeping;
+use crate::prices::{self, PriceHistory};
 use crate::profile_input::{self, ProfileRef};
 use crate::scan::{self, ScanStatus, ScanSummary, PRIVATE_GAMES, PRIVATE_PROFILE};
 use crate::session;
-use crate::settings::{SettingsView, Theme};
+use crate::settings::{PriceWindow, SettingsView, Theme};
 use crate::state::AppState;
 use crate::steam::ProfileView;
 use crate::updater::{self, UpdateState, VersionList};
@@ -175,11 +176,7 @@ pub fn get_last_scan(state: State<'_, AppState>) -> Option<ScanSummary> {
 }
 
 fn rules(state: &AppState) -> completion::Rules {
-    let s = state.settings();
-    completion::Rules {
-        keep_card_set: s.keep_card_set,
-        include_family: s.include_family,
-    }
+    completion::Rules::from_settings(&state.settings())
 }
 
 /// Every listed game: owned, unowned with items, and Steam Family games when
@@ -196,6 +193,12 @@ pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
                 g.complete_items = done.complete;
                 g.counted_items = done.total;
                 g.cards_complete = done.cards_complete;
+                let p = &done.prices;
+                g.value = (p.value_copies > 0).then_some(p.value);
+                g.cost = (p.cost_items > 0 || (done.total > 0 && done.complete == done.total))
+                    .then_some(p.cost);
+                g.cost_points = p.cost_points;
+                g.currency = snap.account.currency.clone();
             }
         }
         Ok(games)
@@ -215,6 +218,8 @@ pub fn get_completion(state: State<'_, AppState>) -> Result<AccountCompletion, S
 pub struct GameDetail {
     completion: Option<GameCompletion>,
     items: Vec<ItemView>,
+    /// The currency prices are shown in.
+    currency: String,
 }
 
 fn game_detail(state: &AppState, appid: u64) -> Result<GameDetail, String> {
@@ -224,6 +229,7 @@ fn game_detail(state: &AppState, appid: u64) -> Result<GameDetail, String> {
         Ok(GameDetail {
             completion: snap.games.get(&appid).cloned(),
             items: snap.game_items(appid),
+            currency: snap.account.currency.clone(),
         })
     })
 }
@@ -249,6 +255,64 @@ pub fn set_item_availability(
         .db
         .write(|tx| completion::set_override(tx, &key, availability, db::now()))?;
     game_detail(&state, appid)
+}
+
+#[derive(Deserialize)]
+pub struct PriceSettingsPatch {
+    currency: Option<String>,
+    price_window: Option<PriceWindow>,
+    spike_percent: Option<u32>,
+    spike_min_cents: Option<u32>,
+}
+
+/// Changes how prices are shown. A new currency reads exchange rates straight
+/// away, so prices switch over without a scan.
+#[tauri::command]
+pub async fn update_price_settings(
+    state: State<'_, AppState>,
+    patch: PriceSettingsPatch,
+) -> Result<SettingsView, String> {
+    if let Some(code) = &patch.currency {
+        if crate::market::currency_id(code).is_none() {
+            return Err("That currency isn't one Steam uses.".to_string());
+        }
+    }
+    let updated = state.update_settings(|s| {
+        if let Some(code) = &patch.currency {
+            s.currency = code.to_ascii_uppercase();
+        }
+        if let Some(w) = patch.price_window {
+            s.price_window = w;
+        }
+        if let Some(p) = patch.spike_percent {
+            s.spike_percent = p.clamp(5, 500);
+        }
+        if let Some(c) = patch.spike_min_cents {
+            s.spike_min_cents = c.min(10_000);
+        }
+        Ok(())
+    })?;
+    if patch.currency.is_some() {
+        // The overview explains it if the rates couldn't be read.
+        let _ = prices::refresh_rates(&state).await;
+    }
+    Ok(updated.view())
+}
+
+/// An item's price history: the stored last year (read from Steam the first
+/// time), or the whole history read fresh with `full`.
+#[tauri::command]
+pub async fn get_price_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hash_name: String,
+    full: Option<bool>,
+) -> Result<PriceHistory, String> {
+    let cookie = match session::current(&app).await {
+        Ok(Some(s)) => Some(s.community_header()),
+        _ => None,
+    };
+    prices::item_history(&state, &hash_name, full.unwrap_or(false), cookie.as_deref()).await
 }
 
 #[tauri::command]

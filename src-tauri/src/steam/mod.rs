@@ -214,7 +214,20 @@ impl SteamClient {
         cookie: Option<&str>,
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
-        self.send(bucket, url, None, cookie, notify).await
+        self.send(bucket, url, None, cookie, &[], notify).await
+    }
+
+    /// A paced GET with extra headers, such as the request type Steam's newer
+    /// Market pages send with their data requests.
+    pub async fn fetch_with(
+        &self,
+        bucket: Bucket,
+        url: &Url,
+        cookie: Option<&str>,
+        headers: &[(&str, &str)],
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        self.send(bucket, url, None, cookie, headers, notify).await
     }
 
     /// Sends a paced POST with a form body. Some Web API methods only accept POST.
@@ -225,7 +238,7 @@ impl SteamClient {
         form: &[(&str, &str)],
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
-        self.send(bucket, url, Some(form), None, notify).await
+        self.send(bucket, url, Some(form), None, &[], notify).await
     }
 
     /// The browser identity used for Steam's web pages and Market, which turn
@@ -253,6 +266,7 @@ impl SteamClient {
         url: &Url,
         form: Option<&[(&str, &str)]>,
         cookie: Option<&str>,
+        headers: &[(&str, &str)],
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
         let signed_in = cookie.is_some();
@@ -280,6 +294,9 @@ impl SteamClient {
                 None => self.http.get(url.clone()),
             };
             request = self.browser_headers(bucket, request);
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
             if let Some(c) = cookie {
                 request = request.header(reqwest::header::COOKIE, c);
             }
@@ -320,6 +337,44 @@ impl SteamClient {
                 }
             }
         }
+    }
+
+    /// How many bytes an answer takes to download, and how it was packed.
+    /// Asking for gzip by hand stops the client from unpacking the answer, so
+    /// the body's length is what came over the wire. Used by the connection test.
+    pub async fn transfer_size(
+        &self,
+        bucket: Bucket,
+        url: &Url,
+        cookie: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> Result<(u16, usize, Option<String>), String> {
+        let signed_in = cookie.is_some();
+        if bucket != Bucket::WebApi && self.is_blocked(bucket, signed_in) {
+            return Ok((429, 0, None));
+        }
+        self.pace(bucket).await;
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        let mut request = self.browser_headers(bucket, self.http.get(url.clone()));
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        request = request.header(reqwest::header::ACCEPT_ENCODING, "gzip, deflate, br");
+        if let Some(c) = cookie {
+            request = request.header(reqwest::header::COOKIE, c);
+        }
+        let resp = request.send().await.map_err(|e| network_message(&e))?;
+        let status = resp.status().as_u16();
+        if status == 429 && bucket != Bucket::WebApi {
+            self.block(bucket, signed_in);
+        }
+        let encoding = resp
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let body = resp.bytes().await.map_err(|e| network_message(&e))?;
+        Ok((status, body.len(), encoding))
     }
 
     /// Steam's web pages and Market get the headers a browser would send.
@@ -617,6 +672,73 @@ impl SteamClient {
         self.post_form(Bucket::WebApi, &url, &form, notify).await
     }
 
+    /// One page (10 items) of a game's items on the Market, cheapest listing
+    /// and number of listings included, sorted by name so pages stay put.
+    pub async fn market_search(
+        &self,
+        appid: u64,
+        start: u64,
+        cookie: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let tag = format!("tag_app_{appid}");
+        let start = start.to_string();
+        let url = community_url(
+            "/market/search/render/",
+            &[
+                ("query", ""),
+                ("start", start.as_str()),
+                ("count", "10"),
+                ("search_descriptions", "0"),
+                ("sort_column", "name"),
+                ("sort_dir", "asc"),
+                ("appid", "753"),
+                ("category_753_Game[]", tag.as_str()),
+                ("norender", "1"),
+            ],
+        );
+        self.fetch(Bucket::Market, &url, cookie, notify).await
+    }
+
+    /// An item's whole price history, from the Market's newer data route.
+    /// Works without sign-in.
+    pub async fn market_history(
+        &self,
+        hash_name: &str,
+        cookie: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = market_action_url("/market/actions", "QueryPriceHistory", hash_name);
+        self.fetch_with(Bucket::Market, &url, cookie, QUERY_ACTION, notify)
+            .await
+    }
+
+    /// The same history from the older route, which needs sign-in.
+    pub async fn market_history_old(
+        &self,
+        hash_name: &str,
+        cookie: &str,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = community_url(
+            "/market/pricehistory/",
+            &[("appid", "753"), ("market_hash_name", hash_name)],
+        );
+        self.fetch(Bucket::Market, &url, Some(cookie), notify).await
+    }
+
+    /// An item's order book: every price level on both sides.
+    pub async fn market_book(
+        &self,
+        hash_name: &str,
+        cookie: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let url = market_action_url("/market/orderbook", "Load", hash_name);
+        self.fetch_with(Bucket::Market, &url, cookie, QUERY_ACTION, notify)
+            .await
+    }
+
     /// A game's card page, read without sign-in.
     pub async fn card_page(
         &self,
@@ -630,6 +752,15 @@ impl SteamClient {
         );
         self.fetch(Bucket::Community, &url, None, notify).await
     }
+}
+
+/// The header Steam's newer Market pages send with their data requests.
+pub const QUERY_ACTION: &[(&str, &str)] = &[("x-valve-request-type", "queryAction")];
+
+/// A data request on the newer Market: `?q=<action>&qp=[753, "<item>"]`.
+pub fn market_action_url(path: &str, action: &str, hash_name: &str) -> Url {
+    let qp = serde_json::json!([753, hash_name]).to_string();
+    community_url(path, &[("q", action), ("qp", qp.as_str())])
 }
 
 pub fn store_url(path: &str, params: &[(&str, &str)]) -> Url {
@@ -794,6 +925,12 @@ mod tests {
         );
         let url = webapi_url("/ISteamUser/ResolveVanityURL/v1/", &[("vanityurl", "a b")]);
         assert!(url.as_str().ends_with("vanityurl=a+b"));
+        // The same shape the Market page itself requests.
+        let url = market_action_url("/market/orderbook", "Load", "308040-Out the window");
+        assert_eq!(
+            url.as_str(),
+            "https://steamcommunity.com/market/orderbook?q=Load&qp=%5B753%2C%22308040-Out+the+window%22%5D"
+        );
     }
 
     #[test]

@@ -6,7 +6,9 @@ mod diagnostics;
 mod hexutil;
 mod housekeeping;
 mod jsonutil;
+mod market;
 mod paths;
+mod prices;
 mod profile_input;
 mod scan;
 mod secret;
@@ -56,6 +58,8 @@ pub fn run() {
             commands::get_completion,
             commands::get_game_detail,
             commands::set_item_availability,
+            commands::get_price_history,
+            commands::update_price_settings,
             commands::get_diagnostics_plan,
             commands::run_diagnostics,
             commands::read_report,

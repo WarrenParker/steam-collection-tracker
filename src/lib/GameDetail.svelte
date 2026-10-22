@@ -10,8 +10,9 @@
     type Group,
     type ItemView,
   } from './api';
-  import { num, owned, pct } from './format';
+  import { change, money, num, owned, pct, points } from './format';
   import Icon from './Icon.svelte';
+  import PricePanel from './PricePanel.svelte';
 
   let {
     game,
@@ -37,8 +38,11 @@
   let detail = $state<GameDetail | null>(null);
   let error = $state('');
   let saving = $state<string | null>(null);
+  let open = $state<string | null>(null);
 
   const done = $derived(detail?.completion ?? null);
+  const cur = $derived(detail?.currency ?? 'USD');
+  const prices = $derived(done?.prices ?? null);
   const sections = $derived.by(() => {
     if (!detail) return [];
     return ORDER.map((group) => ({
@@ -102,6 +106,14 @@
     return '';
   }
 
+  function priceTitle(item: ItemView): string {
+    const p = item.price;
+    if (!p) return item.points_cost !== null ? 'Sold in the Points Shop' : 'Not on the Market';
+    if (!p.on_market) return 'Not for sale on the Market right now';
+    const avg = p.average !== null ? `, average ${money(p.average, cur)}` : '';
+    return `Cheapest of ${num(p.listings)} listed${avg}. Click for details.`;
+  }
+
   function availabilityLabel(a: Availability): string {
     return AVAILABILITY.find((x) => x.value === a)?.label ?? a;
   }
@@ -155,6 +167,18 @@
             <dt title="Level 5 badge and the foil badge">Card set</dt>
             <dd>{done.cards_complete ? 'Complete' : 'Not yet'}</dd>
           {/if}
+          {#if prices && prices.value_copies > 0}
+            <dt title="Copies you could sell, at today's prices, before Steam's fees">Your items' value</dt>
+            <dd>{money(prices.value, cur)}</dd>
+          {/if}
+          {#if prices && (prices.cost_items > 0 || prices.cost_points_items > 0)}
+            <dt title="Everything still needed: Market items in money, Points Shop-only items in points">Cost to complete</dt>
+            <dd>
+              {#if prices.cost_items > 0}{money(prices.cost, cur)}{/if}{#if prices.cost_items > 0 && prices.cost_points > 0}
+                +
+              {/if}{#if prices.cost_points > 0}{points(prices.cost_points)}{/if}
+            </dd>
+          {/if}
           {#if game.ach_total}
             <dt>Achievements</dt>
             <dd>{num(game.ach_unlocked ?? 0)} of {num(game.ach_total)}</dd>
@@ -178,6 +202,13 @@
             </li>
           {/each}
         </ul>
+      {/if}
+
+      {#if prices && prices.alt_items > 0}
+        <p class="desc detail-note">
+          Or buy {num(prices.alt_items)} of the Market items in the Points Shop for {points(prices.alt_points)} instead
+          of {money(prices.alt_money, cur)}.
+        </p>
       {/if}
 
       {#if done && done.unobtainable > 0}
@@ -223,6 +254,24 @@
                     <div class="item-note">{item.note}</div>
                   {/if}
                 </div>
+                <button
+                  class="price-cell"
+                  class:spike={item.tags.includes('Price spike')}
+                  class:dip={item.tags.includes('Price dip')}
+                  class:active={open === item.key}
+                  title={priceTitle(item)}
+                  aria-expanded={open === item.key}
+                  onclick={() => (open = open === item.key ? null : item.key)}
+                >
+                  {#if item.price?.on_market}
+                    <span>{money(item.price.lowest, cur)}</span>
+                    {#if item.price.change !== null}<span class="chg">{change(item.price.change)}</span>{/if}
+                  {:else if item.points_cost !== null && !item.marketable}
+                    <span>{num(item.points_cost)} pts</span>
+                  {:else}
+                    <span class="muted">–</span>
+                  {/if}
+                </button>
                 <div class="item-status" title={statusTitle(item)}>
                   {#if item.have >= item.needed}<Icon name="check" size={14} />{/if}
                   {status(item)}
@@ -245,6 +294,11 @@
                   <span></span>
                 {/if}
               </li>
+              {#if open === item.key}
+                <li class="price-row">
+                  <PricePanel {item} currency={cur} onupdated={load} />
+                </li>
+              {/if}
             {/each}
           </ul>
         </section>

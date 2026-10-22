@@ -28,6 +28,21 @@ impl Theme {
     }
 }
 
+/// How far back the average price looks.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PriceWindow {
+    #[default]
+    Month,
+    Quarter,
+    Year,
+    All,
+}
+
+/// Spike and dip sensitivity, used when the settings file has none.
+pub const SPIKE_PERCENT: u32 = 25;
+pub const SPIKE_MIN_CENTS: u32 = 5;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -46,6 +61,13 @@ pub struct Settings {
     pub include_family: bool,
     /// Cards also need a copy held in the inventory on top of the badge.
     pub keep_card_set: bool,
+    /// The span the average price covers.
+    pub price_window: PriceWindow,
+    /// How far, in percent, today's price must be from the average to be
+    /// tagged a spike or a dip.
+    pub spike_percent: u32,
+    /// And by at least this many cents, so a 3-cent card moving a cent isn't flagged.
+    pub spike_min_cents: u32,
 }
 
 impl Default for Settings {
@@ -60,6 +82,9 @@ impl Default for Settings {
             signed_in_steam_id: None,
             include_family: false,
             keep_card_set: false,
+            price_window: PriceWindow::Month,
+            spike_percent: SPIKE_PERCENT,
+            spike_min_cents: SPIKE_MIN_CENTS,
         }
     }
 }
@@ -76,6 +101,9 @@ pub struct SettingsView {
     pub signed_in: bool,
     pub include_family: bool,
     pub keep_card_set: bool,
+    pub price_window: PriceWindow,
+    pub spike_percent: u32,
+    pub spike_min_cents: u32,
 }
 
 impl Settings {
@@ -139,6 +167,9 @@ impl Settings {
             signed_in: self.signed_in_steam_id.is_some(),
             include_family: self.include_family,
             keep_card_set: self.keep_card_set,
+            price_window: self.price_window,
+            spike_percent: self.spike_percent,
+            spike_min_cents: self.spike_min_cents,
         }
     }
 }
@@ -155,6 +186,8 @@ mod tests {
         assert_eq!(s.currency, "USD");
         assert!(!s.include_family);
         assert!(!s.keep_card_set);
+        assert_eq!(s.price_window, PriceWindow::Month);
+        assert_eq!((s.spike_percent, s.spike_min_cents), (25, 5));
     }
 
     #[test]

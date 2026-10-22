@@ -1,4 +1,4 @@
-//! The collection scan. It runs in the background in four stages:
+//! The collection scan. It runs in the background in six stages:
 //!
 //! 1. **Library:** profile, owned games, Steam Family library, badges,
 //!    inventory, achievements and profile items. A handful of requests.
@@ -7,6 +7,8 @@
 //! 3. **Points Shop:** every item each game sells for points. Web API, batched.
 //! 4. **Item catalog:** each card game's card set, from the game's card page
 //!    (Community pages, paced at one every 3.5 seconds).
+//! 5. **Market prices** and 6. **order books and price history**, in
+//!    `prices.rs`.
 //!
 //! Everything is saved as it arrives, so a scan can be paused, or the app
 //! closed, and picked up later. Rescans only fetch what's missing or out of
@@ -130,6 +132,10 @@ pub struct ScanStatus {
     pub remaining_seconds: Option<u64>,
     /// When a held-back scan carries on by itself (Unix seconds).
     pub resume_at: Option<i64>,
+    /// Items on the Market whose price history hasn't been read yet, once
+    /// reading them has started, and a time estimate.
+    pub prices_remaining: u64,
+    pub prices_seconds: Option<u64>,
     /// How the last run ended, or why it stopped.
     pub message: Option<String>,
     pub pause_requested: bool,
@@ -183,9 +189,12 @@ pub fn status(app: &AppHandle) -> ScanStatus {
     let state = app.state::<AppState>();
     if !state.scan.is_running() {
         let (remaining, seconds) = backlog(&state);
+        let (prices, price_seconds) = price_backlog(&state);
         let mut s = state.scan.status.lock().unwrap_or_else(|e| e.into_inner());
         s.remaining = remaining;
         s.remaining_seconds = seconds;
+        s.prices_remaining = prices;
+        s.prices_seconds = price_seconds;
         if s.message.is_none() {
             if let Some(problem) = &state.db_problem {
                 s.message = Some(format!(
@@ -212,6 +221,8 @@ pub fn start(app: &AppHandle, resume: bool) -> ScanStatus {
             label: "Starting…".to_string(),
             remaining: s.remaining,
             remaining_seconds: s.remaining_seconds,
+            prices_remaining: s.prices_remaining,
+            prices_seconds: s.prices_seconds,
             ..ScanStatus::default()
         };
     });
@@ -243,13 +254,17 @@ pub fn pause(app: &AppHandle) -> ScanStatus {
     state.scan.status()
 }
 
-enum RunEnd {
+pub(crate) enum RunEnd {
     Done {
         seconds: u64,
     },
     Paused,
     /// Stopped before a long first catalog, waiting for a go-ahead.
     NeedsConfirm,
+    /// Stopped before reading every item's price history for the first time.
+    NeedsPriceConfirm {
+        items: u64,
+    },
     /// Steam refused card page requests; carry on at this time.
     Waiting(i64),
 }
@@ -257,6 +272,7 @@ enum RunEnd {
 fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
     let state = app.state::<AppState>();
     let (remaining, remaining_seconds) = backlog(&state);
+    let (prices_remaining, prices_seconds) = price_backlog(&state);
     let (next, message, resume_at) = match outcome {
         Ok(RunEnd::Done { seconds }) => (
             ScanState::Done,
@@ -273,6 +289,15 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
             Some(format!(
                 "Your library is read. Cataloging every game's items takes about {}. You can keep using the app while it runs, and pause it anytime.",
                 duration_text(remaining_seconds.unwrap_or(0))
+            )),
+            None,
+        ),
+        Ok(RunEnd::NeedsPriceConfirm { items }) => (
+            ScanState::Paused,
+            Some(format!(
+                "Prices are read. Reading the price history of {} items takes {}, one request every few seconds. You can keep using the app while it runs, and pause it anytime.",
+                items,
+                duration_text((items as f64 * crate::prices::SECONDS_PER_REQUEST).ceil() as u64)
             )),
             None,
         ),
@@ -295,6 +320,8 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
         s.pause_requested = false;
         s.remaining = remaining;
         s.remaining_seconds = remaining_seconds;
+        s.prices_remaining = prices_remaining;
+        s.prices_seconds = prices_seconds;
         s.message = message;
         s.resume_at = resume_at;
     });
@@ -326,16 +353,33 @@ fn backlog(state: &AppState) -> (u64, Option<u64>) {
     (remaining, seconds)
 }
 
+/// Price histories not read yet, once reading them has started (before
+/// that, the first fill waits for a go-ahead and isn't "unfinished").
+fn price_backlog(state: &AppState) -> (u64, Option<u64>) {
+    let family = state.settings().include_family;
+    let started = state.db.read(db::has_any_history).unwrap_or(false);
+    if !started {
+        return (0, None);
+    }
+    let missing = state
+        .db
+        .read(|c| db::history_missing(c, family))
+        .unwrap_or(0);
+    let seconds =
+        (missing > 0).then(|| (missing as f64 * crate::prices::SECONDS_PER_REQUEST).ceil() as u64);
+    (missing, seconds)
+}
+
 // ---- The run itself -----------------------------------------------------------
 
-struct Ctx<'a> {
-    app: &'a AppHandle,
-    state: &'a AppState,
-    notify: Notify<'a>,
+pub(crate) struct Ctx<'a> {
+    pub(crate) app: &'a AppHandle,
+    pub(crate) state: &'a AppState,
+    pub(crate) notify: Notify<'a>,
 }
 
 impl Ctx<'_> {
-    fn stage(&self, stage: u8, label: &str, total: u64) {
+    pub(crate) fn stage(&self, stage: u8, label: &str, total: u64) {
         self.state.scan.set(self.app, |s| {
             s.stage = stage;
             s.label = label.to_string();
@@ -345,20 +389,20 @@ impl Ctx<'_> {
         });
     }
 
-    fn progress(&self, done: u64, seconds_left: Option<u64>) {
+    pub(crate) fn progress(&self, done: u64, seconds_left: Option<u64>) {
         self.state.scan.set(self.app, |s| {
             s.done = done;
             s.seconds_left = seconds_left;
         });
     }
 
-    fn label(&self, label: &str) {
+    pub(crate) fn label(&self, label: &str) {
         self.state
             .scan
             .set(self.app, |s| s.label = label.to_string());
     }
 
-    fn pause_requested(&self) -> bool {
+    pub(crate) fn pause_requested(&self) -> bool {
         self.state.scan.pause.load(Ordering::SeqCst)
     }
 }
@@ -426,11 +470,19 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
     }
 
     let outcome = catalog_stages(&ctx, &key, &steam_id, family_on, resume).await;
+    // Prices come last, once every game's item list is read.
+    let outcome = match outcome {
+        Ok(RunEnd::Done { .. }) => {
+            let cookie = session.as_ref().map(|s| s.community_header());
+            crate::prices::stages(&ctx, family_on, resume, cookie.as_deref()).await
+        }
+        other => other,
+    };
 
     // Whatever happened, keep the overview's catalog figures current.
     let status = match &outcome {
         Ok(RunEnd::Done { .. }) => "done",
-        Ok(RunEnd::Paused | RunEnd::NeedsConfirm) => "paused",
+        Ok(RunEnd::Paused | RunEnd::NeedsConfirm | RunEnd::NeedsPriceConfirm { .. }) => "paused",
         Ok(RunEnd::Waiting(_)) => "waiting",
         Err(_) => "failed",
     };
@@ -559,7 +611,7 @@ async fn read_library(
     // Shop read again, at most once a day, in case the item is new.
     let rules = completion::Rules {
         keep_card_set: false,
-        include_family: state.settings().include_family,
+        ..completion::Rules::from_settings(&state.settings())
     };
     if let Ok(apps) = state
         .db

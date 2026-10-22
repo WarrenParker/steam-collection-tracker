@@ -124,12 +124,13 @@
             signedIn={settings.signed_in}
             includeFamily={settings.include_family}
             keepCardSet={settings.keep_card_set}
+            priceKey={`${settings.currency}-${settings.price_window}-${settings.spike_percent}-${settings.spike_min_cents}`}
             onprofile={profileChanged}
             onsettings={(s) => (settings = s)}
           />
         </div>
         {#if view === 'games'}
-          {#key `${settings.include_family}-${settings.keep_card_set}`}
+          {#key `${settings.include_family}-${settings.keep_card_set}-${settings.currency}-${settings.price_window}-${settings.spike_percent}-${settings.spike_min_cents}`}
             <Games steamId={settings.profile?.steam_id ?? null} />
           {/key}
         {/if}
