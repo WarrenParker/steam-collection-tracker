@@ -1,20 +1,22 @@
-//! Version 0.1 scan: counts games, badges and inventory items. Later versions
-//! grow this into the full item catalog and completion math.
+//! The scan: counts games, badges and inventory items. Later versions grow this
+//! into the full item catalog and completion math.
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tauri::{AppHandle, Manager};
 
 use crate::paths::AppPaths;
+use crate::session::{self, Session};
 use crate::state::AppState;
-use crate::steam::{inventory, Notify, ProfileView};
+use crate::steam::{inventory, Notify, ProfileView, BLOCK_MINUTES};
 
 pub const PRIVATE_PROFILE: &str = "Your Steam profile is private, so the app can't see your games, badges or inventory. In Steam's privacy settings, set My profile, Game details and Inventory to Public.";
 pub const PRIVATE_GAMES: &str = "Your game details are private, so owned games can't be counted. In Steam's privacy settings, set Game details to Public.";
-const PRIVATE_INVENTORY: &str = "Your inventory is private, so items can't be counted. In Steam's privacy settings, set Inventory to Public.";
-const RATE_LIMITED: &str = "Steam is limiting requests from your connection right now, so the inventory count may be incomplete. Scan again in a few minutes.";
+const PRIVATE_INVENTORY: &str = "Your inventory is private, so items can't be counted. Set Inventory to Public in Steam's privacy settings, or sign in with Steam.";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TypeCount {
@@ -42,6 +44,12 @@ pub struct ScanSummary {
     pub apps_with_items: u64,
     pub apps_not_owned: u64,
     pub warnings: Vec<String>,
+    /// Steam refused the inventory because the app isn't signed in.
+    #[serde(default)]
+    pub needs_sign_in: bool,
+    /// Which way the inventory was read, for the curious.
+    #[serde(default)]
+    pub inventory_route: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -55,10 +63,11 @@ const STEAM_APP: u64 = 753;
 const MAX_INVENTORY_PAGES: u32 = 200;
 
 pub async fn run(
-    state: &AppState,
+    app: &AppHandle,
     notify: Notify<'_>,
     progress: &(dyn Fn(ScanProgress) + Send + Sync),
 ) -> Result<ScanSummary, String> {
+    let state = app.state::<AppState>();
     let key = state.api_key()?;
     let steam_id = state
         .settings()
@@ -98,56 +107,22 @@ pub async fn run(
     let badges = state.steam.badges(&key, &steam_id, notify).await?;
 
     step(4, "Reading your inventory…");
-    let mut tally = inventory::Tally::default();
-    let mut inventory_visible = true;
-    let mut start: Option<String> = None;
-    let mut page = 0u32;
-    loop {
-        page += 1;
-        let f = state
-            .steam
-            .inventory_page(&steam_id, start.as_deref(), notify)
-            .await?;
-        if f.status == 401 || f.status == 403 {
-            inventory_visible = false;
-            if profile.is_public {
-                warnings.push(PRIVATE_INVENTORY.to_string());
-            }
-            break;
+    let session = match session::current(app).await {
+        Ok(s) => s.filter(|s| s.steam_id == steam_id),
+        Err(e) => {
+            warnings.push(e);
+            None
         }
-        if f.status == 429 {
-            warnings.push(RATE_LIMITED.to_string());
-            break;
-        }
-        if !f.is_success() {
-            warnings.push(format!(
-                "Steam couldn't return your inventory (code {}). Scan again later.",
-                f.status
-            ));
-            break;
-        }
-        let Some(v) = f.json().filter(|v| !v.is_null()) else {
-            inventory_visible = false;
-            if profile.is_public {
-                warnings.push(PRIVATE_INVENTORY.to_string());
-            }
-            break;
-        };
-        let info = inventory::tally_page(&v, &mut tally);
-        if let Some(total_items) = info.total {
-            let pages = total_items.div_ceil(2000).max(1);
-            if pages > 1 {
-                step(
-                    4,
-                    &format!("Reading your inventory (page {page} of {pages})…"),
-                );
-            }
-        }
-        if !info.more || info.last_assetid.is_none() || page >= MAX_INVENTORY_PAGES {
-            break;
-        }
-        start = info.last_assetid;
-    }
+    };
+    let on_page = |page: u32, pages: u64| {
+        step(
+            4,
+            &format!("Reading your inventory (page {page} of {pages})…"),
+        );
+    };
+    let outcome = read_inventory(&state, &steam_id, session.as_ref(), notify, &on_page).await?;
+    warnings.extend(outcome.warning.clone());
+    let tally = outcome.tally;
 
     let owned: HashSet<u64> = games.games.iter().map(|g| g.appid).collect();
     let mut item_apps: BTreeSet<u64> = tally.apps.clone();
@@ -193,16 +168,202 @@ pub async fn run(
         foil_badges,
         other_badges,
         player_level: badges.player_level,
-        inventory_visible,
+        inventory_visible: outcome.visible,
         inventory_items: tally.items,
         foil_cards: tally.foil_cards,
         by_type,
         apps_with_items: item_apps.len() as u64,
         apps_not_owned,
         warnings,
+        needs_sign_in: outcome.needs_sign_in,
+        inventory_route: outcome.route.map(str::to_string),
     };
     save_last(&state.paths, &summary);
     Ok(summary)
+}
+
+pub struct InventoryOutcome {
+    pub tally: inventory::Tally,
+    pub visible: bool,
+    pub route: Option<&'static str>,
+    pub warning: Option<String>,
+    pub needs_sign_in: bool,
+}
+
+enum Route<'a> {
+    /// Steam's Web API with the signed-in user's token: generous limits.
+    Api(&'a str),
+    /// The community inventory, as the signed-in user.
+    Signed(String),
+    /// The community inventory, anonymously.
+    Anonymous,
+}
+
+impl Route<'_> {
+    fn name(&self) -> &'static str {
+        match self {
+            Route::Api(_) => "Steam Web API, signed in",
+            Route::Signed(_) => "Steam Community, signed in",
+            Route::Anonymous => "Steam Community, not signed in",
+        }
+    }
+}
+
+#[derive(Debug)]
+enum PageError {
+    Refused,
+    Private,
+    Status(u16),
+    Unreadable,
+}
+
+/// Reads the whole Steam inventory, trying the signed-in routes first.
+pub async fn read_inventory(
+    state: &AppState,
+    steam_id: &str,
+    session: Option<&Session>,
+    notify: Notify<'_>,
+    on_page: &(dyn Fn(u32, u64) + Send + Sync),
+) -> Result<InventoryOutcome, String> {
+    let token = session.and_then(|s| s.access_token());
+    let mut routes: Vec<Route> = Vec::new();
+    if let Some(t) = token.as_deref() {
+        routes.push(Route::Api(t));
+    }
+    match session {
+        Some(s) => routes.push(Route::Signed(s.community_header())),
+        None => routes.push(Route::Anonymous),
+    }
+
+    let mut errors: Vec<PageError> = Vec::new();
+    for route in &routes {
+        let api = matches!(route, Route::Api(_));
+        let mut tally = inventory::Tally::default();
+        let mut start: Option<String> = None;
+        let mut page = 0u32;
+        let result: Result<(), PageError> = loop {
+            page += 1;
+            let f = match route {
+                Route::Api(t) => {
+                    state
+                        .steam
+                        .inventory_api_page(t, steam_id, start.as_deref(), notify)
+                        .await?
+                }
+                Route::Signed(cookie) => {
+                    state
+                        .steam
+                        .inventory_page(steam_id, start.as_deref(), Some(cookie.as_str()), notify)
+                        .await?
+                }
+                Route::Anonymous => {
+                    state
+                        .steam
+                        .inventory_page(steam_id, start.as_deref(), None, notify)
+                        .await?
+                }
+            };
+            if f.status == 429 {
+                break Err(PageError::Refused);
+            }
+            if f.status == 401 || f.status == 403 {
+                break Err(if api {
+                    PageError::Status(f.status)
+                } else {
+                    PageError::Private
+                });
+            }
+            if !f.is_success() {
+                break Err(PageError::Status(f.status));
+            }
+            let Some(v) = f.json() else {
+                break Err(PageError::Unreadable);
+            };
+            let v = if api {
+                v.get("response").cloned().unwrap_or(Value::Null)
+            } else {
+                v
+            };
+            if v.is_null() {
+                break Err(PageError::Private);
+            }
+            if v.get("assets").is_none() && v.get("total_inventory_count").is_none() {
+                break Err(PageError::Unreadable);
+            }
+            let info = inventory::tally_page(&v, &mut tally);
+            if let Some(total) = info.total {
+                let pages = total.div_ceil(2000).max(1);
+                if pages > 1 {
+                    on_page(page, pages);
+                }
+            }
+            if !info.more || info.last_assetid.is_none() || page >= MAX_INVENTORY_PAGES {
+                break Ok(());
+            }
+            start = info.last_assetid;
+        };
+        match result {
+            Ok(()) => {
+                return Ok(InventoryOutcome {
+                    tally,
+                    visible: true,
+                    route: Some(route.name()),
+                    warning: None,
+                    needs_sign_in: false,
+                })
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
+    // Every route failed: explain the most useful reason.
+    let (warning, needs_sign_in) = if session.is_none() {
+        match errors.last() {
+            Some(PageError::Refused) => (None, true),
+            Some(PageError::Private) => (Some(PRIVATE_INVENTORY.to_string()), false),
+            Some(PageError::Status(code)) => (
+                Some(format!(
+                    "Steam couldn't return your inventory (code {code}). Scan again later."
+                )),
+                false,
+            ),
+            _ => (
+                Some("Steam's inventory answer couldn't be read. Scan again later.".to_string()),
+                false,
+            ),
+        }
+    } else if errors.iter().all(|e| matches!(e, PageError::Refused)) {
+        (
+            Some(format!(
+                "Steam is limiting inventory requests from your connection right now, even signed in. The app will wait {BLOCK_MINUTES} minutes before asking again."
+            )),
+            false,
+        )
+    } else {
+        let codes: Vec<String> = errors
+            .iter()
+            .map(|e| match e {
+                PageError::Refused => "refused".to_string(),
+                PageError::Private => "private".to_string(),
+                PageError::Status(c) => format!("code {c}"),
+                PageError::Unreadable => "unreadable".to_string(),
+            })
+            .collect();
+        (
+            Some(format!(
+                "Steam wouldn't return your inventory ({}). Scan again later, and run the connection test if it keeps happening.",
+                codes.join(", ")
+            )),
+            false,
+        )
+    };
+    Ok(InventoryOutcome {
+        tally: inventory::Tally::default(),
+        visible: false,
+        route: None,
+        warning,
+        needs_sign_in,
+    })
 }
 
 fn last_scan_file(paths: &AppPaths) -> std::path::PathBuf {

@@ -19,7 +19,15 @@
   let info = $state<AppInfo | null>(null);
   let update = $state<UpdateState | null>(null);
   let settingsOpen = $state(false);
+  let settingsFocus = $state<'updates' | null>(null);
   let fatal = $state('');
+
+  const updateWaiting = $derived(!!update && (update.ready || update.available));
+
+  function openSettings(focus: 'updates' | null = null) {
+    settingsFocus = focus;
+    settingsOpen = true;
+  }
 
   const needsSetup = $derived(
     settings !== null && (!settings.has_api_key || settings.profile === null),
@@ -76,8 +84,16 @@
             </div>
           {/if}
           <button
+            class="btn ghost small version-chip"
+            class:waiting={updateWaiting}
+            onclick={() => openSettings('updates')}
+            title="Updates and version history"
+          >
+            {#if updateWaiting}<span class="update-dot" aria-hidden="true"></span>Update available{:else}v{info.version}{/if}
+          </button>
+          <button
             class="btn ghost icon-btn"
-            onclick={() => (settingsOpen = true)}
+            onclick={() => openSettings()}
             aria-label="Settings"
             title="Settings"
           >
@@ -89,7 +105,11 @@
         <UpdateBar {update} />
       {/if}
       <main class="content">
-        <Overview onprofile={profileChanged} />
+        <Overview
+          signedIn={settings.signed_in}
+          onprofile={profileChanged}
+          onsettings={(s) => (settings = s)}
+        />
       </main>
     </div>
   {/if}
@@ -98,6 +118,7 @@
       {settings}
       {info}
       {update}
+      focus={settingsFocus}
       onclose={() => (settingsOpen = false)}
       onchange={(s) => (settings = s)}
     />

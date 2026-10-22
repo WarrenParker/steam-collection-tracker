@@ -6,19 +6,23 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::diagnostics::{self, DiagStep, DiagnosticsResult};
+use crate::housekeeping;
 use crate::profile_input::{self, ProfileRef};
 use crate::scan::{self, ScanProgress, ScanSummary, PRIVATE_GAMES, PRIVATE_PROFILE};
+use crate::session;
 use crate::settings::{SettingsView, Theme};
 use crate::state::AppState;
 use crate::steam::ProfileView;
-use crate::updater::{self, UpdateState};
+use crate::updater::{self, UpdateState, VersionList};
 
 const BUSY: &str = "The app is already talking to Steam. Wait for that to finish, then try again.";
 
 #[derive(Serialize)]
 pub struct AppInfo {
     version: String,
+    build: Option<String>,
     data_dir: String,
+    data_size_bytes: u64,
     portable: bool,
     updates_enabled: bool,
 }
@@ -44,13 +48,15 @@ pub fn app_ready(window: WebviewWindow) {
 }
 
 #[tauri::command]
-pub fn get_app_info(state: State<'_, AppState>) -> AppInfo {
-    AppInfo {
+pub async fn get_app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
+    Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        build: updater::build_id(),
         data_dir: state.paths.root.display().to_string(),
+        data_size_bytes: housekeeping::folder_size(&state.paths.root),
         portable: state.paths.portable,
         updates_enabled: updater::enabled(),
-    }
+    })
 }
 
 #[tauri::command]
@@ -136,10 +142,11 @@ pub async fn run_scan(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
     let notify = move |message: String| {
         let _ = note_app.emit("scan-note", message);
     };
+    let progress_app = app.clone();
     let progress = move |p: ScanProgress| {
-        let _ = app.emit("scan-progress", p);
+        let _ = progress_app.emit("scan-progress", p);
     };
-    scan::run(state.inner(), &notify, &progress).await
+    scan::run(&app, &notify, &progress).await
 }
 
 #[tauri::command]
@@ -162,10 +169,11 @@ pub async fn run_diagnostics(
     let notify = move |message: String| {
         let _ = note_app.emit("diag-note", message);
     };
+    let step_app = app.clone();
     let emit_step = move |step: DiagStep| {
-        let _ = app.emit("diag-progress", step);
+        let _ = step_app.emit("diag-progress", step);
     };
-    diagnostics::run(state.inner(), &notify, &emit_step).await
+    diagnostics::run(&app, &notify, &emit_step).await
 }
 
 /// Only files inside the reports folder can be read or shown.
@@ -224,7 +232,80 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateState, String> {
     Ok(updater::check(&app, false).await)
 }
 
+/// Installs the newest version and restarts the app.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    updater::install_and_restart(&app).await
+    updater::install_latest_and_restart(&app).await
+}
+
+/// Every published version, for the version history.
+#[tauri::command]
+pub async fn get_versions(app: AppHandle) -> Result<VersionList, String> {
+    updater::versions(&app).await
+}
+
+/// Installs a specific version (newer or older) and restarts the app.
+#[tauri::command]
+pub async fn install_version(app: AppHandle, version: String) -> Result<(), String> {
+    updater::install_version_and_restart(&app, &version).await
+}
+
+#[derive(Serialize)]
+pub struct SignInResult {
+    settings: SettingsView,
+    /// True when signing in switched the tracked profile to a different account.
+    switched_profile: bool,
+}
+
+/// Opens Steam's sign-in window and waits for the user to sign in.
+#[tauri::command]
+pub async fn sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<SignInResult, String> {
+    let signed = session::sign_in(&app).await?;
+    let previous = state.settings().profile.map(|p| p.steam_id);
+    let switched_profile =
+        previous.is_some() && previous.as_deref() != Some(signed.steam_id.as_str());
+
+    // The app tracks the signed-in account.
+    let quiet = |_: String| {};
+    let profile = match state.api_key() {
+        Ok(key) => state
+            .steam
+            .player_summary(&key, &signed.steam_id, &quiet)
+            .await
+            .ok(),
+        Err(_) => None,
+    };
+    let steam_id = signed.steam_id.clone();
+    let updated = state.update_settings(move |s| {
+        let keep_current = s.profile.as_ref().is_some_and(|p| p.steam_id == steam_id);
+        if let Some(p) = profile {
+            s.profile = Some(p);
+        } else if !keep_current {
+            s.profile = Some(ProfileView {
+                steam_id: steam_id.clone(),
+                persona_name: "Steam user".to_string(),
+                avatar_url: None,
+                profile_url: None,
+                is_public: true,
+            });
+        }
+        s.signed_in_steam_id = Some(steam_id);
+        Ok(())
+    })?;
+    *state.session.lock().await = Some(signed);
+    Ok(SignInResult {
+        settings: updated.view(),
+        switched_profile,
+    })
+}
+
+/// Signs out of Steam, on Steam's side too.
+#[tauri::command]
+pub async fn sign_out(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsView, String> {
+    let updated = state.update_settings(|s| {
+        s.signed_in_steam_id = None;
+        Ok(())
+    })?;
+    session::sign_out(&app).await;
+    Ok(updated.view())
 }

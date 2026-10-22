@@ -1,10 +1,12 @@
 mod commands;
 mod diagnostics;
 mod hexutil;
+mod housekeeping;
 mod paths;
 mod profile_input;
 mod scan;
 mod secret;
+mod session;
 mod settings;
 mod state;
 mod steam;
@@ -18,7 +20,7 @@ pub fn run() {
     let paths = paths::AppPaths::detect();
     let settings = settings::Settings::load(&paths.settings_file());
     let theme = settings.theme;
-    updater::cleanup_leftovers(&paths);
+    housekeeping::tidy_up(&paths);
     let app_state = state::AppState::new(paths.clone(), settings);
 
     tauri::Builder::default()
@@ -41,6 +43,10 @@ pub fn run() {
             commands::get_update_info,
             commands::check_for_updates,
             commands::install_update,
+            commands::get_versions,
+            commands::install_version,
+            commands::sign_in,
+            commands::sign_out,
         ])
         .setup(move |app| {
             // The window starts hidden and the interface shows it once it has drawn,

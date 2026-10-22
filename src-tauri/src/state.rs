@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::paths::AppPaths;
+use crate::session::Session;
 use crate::settings::Settings;
 use crate::steam::SteamClient;
 use crate::updater::UpdateState;
@@ -16,6 +17,8 @@ pub struct AppState {
     /// True while a scan or diagnostics run is talking to Steam.
     busy: AtomicBool,
     pub update: Mutex<UpdateState>,
+    /// The Steam sign-in, cached while it's valid.
+    pub session: tokio::sync::Mutex<Option<Session>>,
 }
 
 impl AppState {
@@ -27,6 +30,7 @@ impl AppState {
             exe_path: std::env::current_exe().ok(),
             busy: AtomicBool::new(false),
             update: Mutex::new(UpdateState::default()),
+            session: tokio::sync::Mutex::new(None),
         }
     }
 

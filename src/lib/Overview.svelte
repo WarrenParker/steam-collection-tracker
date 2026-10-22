@@ -8,12 +8,24 @@
     type ProfileView,
     type ScanProgress,
     type ScanSummary,
+    type SettingsView,
   } from './api';
   import { ago, duration, num } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
+  import SignInButton from './SignInButton.svelte';
 
-  let { onprofile }: { onprofile: (p: ProfileView) => void } = $props();
+  let {
+    signedIn,
+    onprofile,
+    onsettings,
+  }: {
+    signedIn: boolean;
+    onprofile: (p: ProfileView) => void;
+    onsettings: (s: SettingsView) => void;
+  } = $props();
+
+  let justSignedIn = $state(false);
 
   let scan = $state<ScanSummary | null>(null);
   let loaded = $state(false);
@@ -59,6 +71,7 @@
     error = '';
     note = '';
     progress = { step: 1, total: 4, message: 'Starting…' };
+    justSignedIn = false;
     try {
       scan = await api.runScan();
       onprofile(scan.profile);
@@ -105,6 +118,28 @@
         depending on the size of your inventory.
       </p>
     </div>
+  {/if}
+
+  {#if scan?.needs_sign_in && !signedIn}
+    <div class="notice warn">
+      <Icon name="alert" />
+      <div>
+        <p>
+          Steam won't share your inventory with an app that isn't signed in, so items couldn't be counted.
+          Sign in with Steam, then scan again.
+        </p>
+        <SignInButton
+          small
+          onsignedin={(r) => {
+            onsettings(r.settings);
+            justSignedIn = true;
+          }}
+        />
+      </div>
+    </div>
+  {/if}
+  {#if justSignedIn && !scanning}
+    <div class="notice good"><Icon name="check" /><p>Signed in. Press Scan again to read your inventory.</p></div>
   {/if}
 
   {#if scan}
@@ -182,6 +217,10 @@
           <dd>{num(scan.apps_not_owned)}</dd>
           <dt>Requests to Steam</dt>
           <dd>{num(scan.requests)}</dd>
+          {#if scan.inventory_route}
+            <dt>Inventory read through</dt>
+            <dd class="route">{scan.inventory_route}</dd>
+          {/if}
         </dl>
       </section>
     </div>
@@ -190,7 +229,7 @@
   <Diagnostics />
 
   <p class="phase-note">
-    This is version 0.1. Completion percentages, full item lists and prices arrive in the next
+    This is an early version. Completion percentages, full item lists and prices arrive in the next
     versions.
   </p>
 </div>

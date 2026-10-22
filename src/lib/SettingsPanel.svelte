@@ -1,24 +1,31 @@
 <script lang="ts">
+  import { onMount, tick } from 'svelte';
   import {
     api,
     errorText,
     type AppInfo,
     type SettingsView,
+    type SignInResult,
     type Theme,
     type UpdateState,
   } from './api';
+  import { bytes } from './format';
   import Icon from './Icon.svelte';
+  import SignInButton from './SignInButton.svelte';
+  import VersionHistory from './VersionHistory.svelte';
 
   let {
     settings,
     info,
     update,
+    focus = null,
     onclose,
     onchange,
   }: {
     settings: SettingsView;
     info: AppInfo;
     update: UpdateState | null;
+    focus?: 'updates' | null;
     onclose: () => void;
     onchange: (s: SettingsView) => void;
   } = $props();
@@ -36,13 +43,21 @@
   let error = $state('');
   let saved = $state('');
   let checking = $state(false);
+  let installing = $state(false);
   let updateMessage = $state('');
+  let updateError = $state('');
+  let updatesSection = $state<HTMLElement | null>(null);
 
-  const updateText = $derived(
-    !info.updates_enabled
-      ? 'Updates are turned off in this copy of the app.'
-      : updateMessage || update?.error || '',
+  const versionText = $derived(
+    `Version ${info.version}${info.build ? ` (build ${info.build})` : ''}`,
   );
+
+  onMount(async () => {
+    if (focus === 'updates') {
+      await tick();
+      updatesSection?.scrollIntoView({ block: 'start' });
+    }
+  });
 
   function startEditing(what: 'key' | 'profile') {
     editing = editing === what ? 'none' : what;
@@ -62,7 +77,7 @@
     try {
       onchange(await api.updatePreferences({ auto_update: !settings.auto_update }));
     } catch (e) {
-      error = errorText(e);
+      updateError = errorText(e);
     }
   }
 
@@ -99,19 +114,52 @@
     }
   }
 
+  function signedIn(result: SignInResult) {
+    onchange(result.settings);
+    error = '';
+    saved = result.switched_profile
+      ? `Signed in. The app now tracks ${result.settings.profile?.persona_name ?? 'that account'}. Scan again to refresh your numbers.`
+      : 'Signed in. Scan again to read your inventory.';
+  }
+
+  async function signOut() {
+    busy = true;
+    error = '';
+    try {
+      onchange(await api.signOut());
+      saved = 'Signed out of Steam.';
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function checkUpdates() {
     checking = true;
     updateMessage = '';
+    updateError = '';
     try {
       const u = await api.checkForUpdates();
-      if (u.error) updateMessage = u.error;
-      else if (u.ready) updateMessage = `Version ${u.latest} is ready. Restart the app to finish updating.`;
+      if (u.error) updateError = u.error;
+      else if (u.ready) updateMessage = `Version ${u.latest} is downloaded. Restart the app to finish updating.`;
       else if (u.available) updateMessage = `Version ${u.latest} is available.`;
       else updateMessage = "You're on the newest version.";
     } catch (e) {
-      updateMessage = errorText(e);
+      updateError = errorText(e);
     } finally {
       checking = false;
+    }
+  }
+
+  async function installLatest() {
+    installing = true;
+    updateError = '';
+    try {
+      await api.installUpdate();
+    } catch (e) {
+      updateError = errorText(e);
+      installing = false;
     }
   }
 
@@ -170,6 +218,23 @@
 
       <div class="setting-row">
         <div>
+          <div>Steam sign-in</div>
+          <div class="desc">
+            {settings.signed_in
+              ? 'Signed in. The app can read your inventory, prices and Points Shop items.'
+              : 'Steam only shares your inventory, prices and Points Shop items with apps that are signed in.'}
+          </div>
+        </div>
+        {#if settings.signed_in}
+          <button class="btn small" onclick={signOut} disabled={busy}>Sign out</button>
+        {/if}
+      </div>
+      {#if !settings.signed_in}
+        <SignInButton small onsignedin={signedIn} />
+      {/if}
+
+      <div class="setting-row">
+        <div>
           <div>API key</div>
           <div class="desc">
             {settings.has_api_key ? `Saved, ends in ${settings.api_key_hint}` : 'Not saved'}
@@ -196,8 +261,39 @@
       {#if saved}<p class="desc good">{saved}</p>{/if}
     </section>
 
-    <section class="setting-group">
+    <section class="setting-group" bind:this={updatesSection}>
       <h3>Updates</h3>
+      <div class="setting-row">
+        <div>
+          <div>{versionText}</div>
+          {#if !info.updates_enabled}
+            <div class="desc">Updates are turned off in this copy of the app.</div>
+          {:else if updateMessage}
+            <div class="desc">{updateMessage}</div>
+          {/if}
+        </div>
+        <button class="btn small" onclick={checkUpdates} disabled={checking || !info.updates_enabled}>
+          {checking ? 'Checking…' : 'Check for updates'}
+        </button>
+      </div>
+
+      {#if update?.ready}
+        <div class="update-callout">
+          <p>Version {update.latest} is downloaded. Restart the app to start using it.</p>
+          <button class="btn small primary" onclick={installLatest} disabled={installing}>
+            {installing ? 'Restarting…' : 'Restart now'}
+          </button>
+        </div>
+      {:else if update?.available}
+        <div class="update-callout">
+          <p>Version {update.latest} is available. The app restarts by itself once it's installed.</p>
+          <button class="btn small primary" onclick={installLatest} disabled={installing}>
+            {installing ? 'Installing…' : 'Update now'}
+          </button>
+        </div>
+      {/if}
+      {#if updateError}<p class="field-error" role="alert">{updateError}</p>{/if}
+
       <div class="setting-row">
         <div>
           <div>Install updates automatically</div>
@@ -211,22 +307,17 @@
           onclick={toggleAutoUpdate}
         ></button>
       </div>
-      <div class="setting-row">
-        <div>
-          <div>Version {info.version}</div>
-          {#if updateText}<div class="desc">{updateText}</div>{/if}
-        </div>
-        <button class="btn small" onclick={checkUpdates} disabled={checking || !info.updates_enabled}>
-          {checking ? 'Checking…' : 'Check now'}
-        </button>
-      </div>
+
+      {#if info.updates_enabled}
+        <VersionHistory />
+      {/if}
     </section>
 
     <section class="setting-group">
       <h3>Storage</h3>
       <p class="desc">
         {info.portable
-          ? 'Settings and saved data live in the data folder next to the app.'
+          ? `Settings and saved data use ${bytes(info.data_size_bytes)} in the data folder next to the app. Old reports, update files and web caches are cleaned up automatically.`
           : "The app's own folder can't be written to, so data is saved here instead:"}
       </p>
       <p class="path selectable">{info.data_dir}</p>

@@ -39,6 +39,9 @@ pub struct Settings {
     pub api_key_protected: Option<String>,
     /// The last four characters of the key, so the user can recognise it.
     pub api_key_hint: Option<String>,
+    /// The account the user signed in to Steam with, if they did. The sign-in
+    /// cookies themselves stay in the WebView's encrypted cookie store.
+    pub signed_in_steam_id: Option<String>,
 }
 
 impl Default for Settings {
@@ -50,6 +53,7 @@ impl Default for Settings {
             profile: None,
             api_key_protected: None,
             api_key_hint: None,
+            signed_in_steam_id: None,
         }
     }
 }
@@ -63,6 +67,7 @@ pub struct SettingsView {
     pub profile: Option<ProfileView>,
     pub has_api_key: bool,
     pub api_key_hint: Option<String>,
+    pub signed_in: bool,
 }
 
 impl Settings {
@@ -123,6 +128,7 @@ impl Settings {
             profile: self.profile.clone(),
             has_api_key: matches!(self.api_key(), Ok(Some(_))),
             api_key_hint: self.api_key_hint.clone(),
+            signed_in: self.signed_in_steam_id.is_some(),
         }
     }
 }

@@ -18,11 +18,14 @@ export interface SettingsView {
   profile: ProfileView | null;
   has_api_key: boolean;
   api_key_hint: string | null;
+  signed_in: boolean;
 }
 
 export interface AppInfo {
   version: string;
+  build: string | null;
   data_dir: string;
+  data_size_bytes: number;
   portable: boolean;
   updates_enabled: boolean;
 }
@@ -57,6 +60,8 @@ export interface ScanSummary {
   apps_with_items: number;
   apps_not_owned: number;
   warnings: string[];
+  needs_sign_in: boolean;
+  inventory_route: string | null;
 }
 
 export interface ScanProgress {
@@ -93,6 +98,27 @@ export interface UpdateState {
   error: string | null;
 }
 
+export interface SignInResult {
+  settings: SettingsView;
+  switched_profile: boolean;
+}
+
+export interface ReleaseInfo {
+  version: string;
+  notes: string;
+  published_at: string | null;
+  prerelease: boolean;
+  installable: boolean;
+  current: boolean;
+  newer: boolean;
+}
+
+export interface VersionList {
+  current: string;
+  build: string | null;
+  releases: ReleaseInfo[];
+}
+
 export const api = {
   appReady: () => invoke<void>('app_ready'),
   appInfo: () => invoke<AppInfo>('get_app_info'),
@@ -111,6 +137,10 @@ export const api = {
   updateInfo: () => invoke<UpdateState>('get_update_info'),
   checkForUpdates: () => invoke<UpdateState>('check_for_updates'),
   installUpdate: () => invoke<void>('install_update'),
+  versions: () => invoke<VersionList>('get_versions'),
+  installVersion: (version: string) => invoke<void>('install_version', { version }),
+  signIn: () => invoke<SignInResult>('sign_in'),
+  signOut: () => invoke<SettingsView>('sign_out'),
 };
 
 export function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {

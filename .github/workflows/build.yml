@@ -78,7 +78,24 @@ jobs:
             "Release $tag already exists, so nothing was published." | Out-File -FilePath build.log -Append
             exit 0
           }
-          gh release create $tag out/SteamCollectionTracker.exe out/SteamCollectionTracker.exe.sha256 --target $env:GITHUB_SHA --title "Steam Collection Tracker $tag" --notes-file release-notes.md
+          # The release notes are this version's section of CHANGELOG.md.
+          $notes = New-Object System.Collections.Generic.List[string]
+          $capture = $false
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line -match '^## \[') {
+              if ($capture) { break }
+              $capture = $line -match ('^## \[' + [regex]::Escape($version) + '\]')
+              continue
+            }
+            if ($capture) { $notes.Add($line) }
+          }
+          $text = ($notes -join "`n").Trim()
+          if (-not $text) {
+            "CHANGELOG.md has no entry for $version, so it wasn't published." | Out-File -FilePath build.log -Append
+            exit 1
+          }
+          Set-Content -Path release-notes.md -Value $text
+          gh release create $tag out/SteamCollectionTracker.exe out/SteamCollectionTracker.exe.sha256 --target $env:GITHUB_SHA --title "Steam Collection Tracker $version" --notes-file release-notes.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "Published release $tag" | Out-File -FilePath build.log -Append
 
@@ -92,7 +109,7 @@ jobs:
           encode() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
           touch build.log
           if [ "${{ job.status }}" = "success" ]; then
-            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
+            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists|CHANGELOG" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
             echo "::notice title=Build report::${body}"
           else
             body=$( { grep -v -E "^\s*(Compiling|Downloading|Downloaded|Checking|Fresh)\b" build.log || true; } | tail -n 150 | encode)

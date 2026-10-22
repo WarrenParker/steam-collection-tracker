@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, errorText, links, type ProfileCheck, type SettingsView } from './api';
   import Icon from './Icon.svelte';
+  import SignInButton from './SignInButton.svelte';
 
   let { settings, oncomplete }: { settings: SettingsView; oncomplete: (s: SettingsView) => void } =
     $props();
@@ -14,6 +15,7 @@
   let busy = $state(false);
   let error = $state('');
   let check = $state<ProfileCheck | null>(null);
+  let signedIn = $state(settings.signed_in);
 
   const steps = [
     { n: 1, label: 'API key' },
@@ -164,7 +166,26 @@
           </div>
         </div>
       {/each}
-      <p class="lede">Next, scan your profile from the overview. The first scan takes about a minute.</p>
+      <div class="signin-block">
+        <h2>Sign in with Steam <span class="tag">Recommended</span></h2>
+        <p>
+          Steam only shares your inventory, market prices and Points Shop items with apps that are signed
+          in. Steam's own sign-in page opens in a small window, where you can scan a QR code with the Steam
+          mobile app. The app doesn't read or store your password.
+        </p>
+        {#if signedIn}
+          <p class="desc good">Signed in.</p>
+        {:else}
+          <SignInButton
+            onsignedin={(r) => {
+              current = r.settings;
+              signedIn = true;
+              if (r.settings.profile && check) check = { ...check, profile: r.settings.profile };
+            }}
+          />
+        {/if}
+      </div>
+      <p class="lede">Next, scan your profile from the overview.</p>
       <div class="actions">
         <button class="btn primary" type="button" onclick={() => oncomplete(current)}>Go to overview</button>
         <button class="btn ghost" type="button" onclick={() => goTo(2)}>Use a different profile</button>

@@ -1,9 +1,10 @@
 //! Talking to Steam.
 //!
 //! Every request goes through one paced client. Steam limits how often an
-//! internet connection may call the Community and Market pages, and going over
-//! can lock you out for hours, so each kind of request has its own minimum gap
-//! and the client waits and retries when Steam says to slow down.
+//! internet connection may call the Community pages, inventory and Market, and
+//! asking again after a refusal can stretch a block out for hours. So each kind
+//! of request has its own minimum gap, and when Steam refuses one (HTTP 429) the
+//! client stops sending that kind of request for a while instead of retrying.
 
 pub mod inventory;
 
@@ -18,6 +19,10 @@ use tokio::sync::Mutex;
 
 pub const WEBAPI: &str = "https://api.steampowered.com";
 pub const COMMUNITY: &str = "https://steamcommunity.com";
+pub const STORE: &str = "https://store.steampowered.com";
+
+/// How long the app leaves a kind of request alone after Steam refuses it.
+pub const BLOCK_MINUTES: u64 = 30;
 
 /// Called with short, plain-language status messages (for example when waiting).
 pub type Notify<'a> = &'a (dyn Fn(String) + Send + Sync);
@@ -26,10 +31,14 @@ pub type Notify<'a> = &'a (dyn Fn(String) + Send + Sync);
 pub enum Bucket {
     /// api.steampowered.com: generous limits.
     WebApi,
-    /// steamcommunity.com pages and inventory: strict per-connection limits.
+    /// steamcommunity.com pages (badges, card sets).
     Community,
+    /// steamcommunity.com/inventory: strict, and refused to anonymous apps on some connections.
+    Inventory,
     /// steamcommunity.com/market: the strictest.
     Market,
+    /// store.steampowered.com.
+    Store,
 }
 
 impl Bucket {
@@ -37,15 +46,9 @@ impl Bucket {
         match self {
             Bucket::WebApi => Duration::from_millis(300),
             Bucket::Community => Duration::from_millis(3500),
+            Bucket::Inventory => Duration::from_millis(4000),
             Bucket::Market => Duration::from_millis(4000),
-        }
-    }
-
-    /// Seconds to wait before each retry after Steam answers "too many requests".
-    fn retry_waits(self) -> &'static [u64] {
-        match self {
-            Bucket::WebApi => &[5, 15],
-            _ => &[20, 60],
+            Bucket::Store => Duration::from_millis(1000),
         }
     }
 }
@@ -56,6 +59,9 @@ pub struct Fetched {
     pub body: String,
     pub elapsed_ms: u64,
     pub final_url: String,
+    /// True when the request wasn't sent because Steam refused this kind of
+    /// request recently. `status` is then 429.
+    pub skipped: bool,
 }
 
 impl Fetched {
@@ -110,6 +116,8 @@ pub struct Badge {
 pub struct SteamClient {
     http: reqwest::Client,
     last: Mutex<HashMap<Bucket, Instant>>,
+    /// (kind of request, signed in) -> refused until.
+    blocked: std::sync::Mutex<HashMap<(Bucket, bool), Instant>>,
     requests: AtomicU32,
 }
 
@@ -128,6 +136,7 @@ impl SteamClient {
         Self {
             http,
             last: Mutex::new(HashMap::new()),
+            blocked: std::sync::Mutex::new(HashMap::new()),
             requests: AtomicU32::new(0),
         }
     }
@@ -139,6 +148,22 @@ impl SteamClient {
     /// Total requests sent to Steam since the app started.
     pub fn requests(&self) -> u32 {
         self.requests.load(Ordering::Relaxed)
+    }
+
+    /// Whether Steam refused this kind of request recently.
+    pub fn is_blocked(&self, bucket: Bucket, signed_in: bool) -> bool {
+        let blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
+        blocked
+            .get(&(bucket, signed_in))
+            .is_some_and(|until| Instant::now() < *until)
+    }
+
+    fn block(&self, bucket: Bucket, signed_in: bool) {
+        let mut blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
+        blocked.insert(
+            (bucket, signed_in),
+            Instant::now() + Duration::from_secs(BLOCK_MINUTES * 60),
+        );
     }
 
     async fn pace(&self, bucket: Bucket) {
@@ -153,22 +178,41 @@ impl SteamClient {
         last.insert(bucket, Instant::now());
     }
 
-    /// Sends a paced GET request. Non-success HTTP codes are returned as data so
-    /// callers can explain them; only network failures become errors.
+    /// Sends a paced GET request, optionally with Steam sign-in cookies.
+    /// Non-success HTTP codes are returned as data so callers can explain them;
+    /// only network failures become errors.
     pub async fn fetch(
         &self,
         bucket: Bucket,
         url: &Url,
+        cookie: Option<&str>,
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
-        let waits = bucket.retry_waits();
+        let signed_in = cookie.is_some();
+        if bucket != Bucket::WebApi && self.is_blocked(bucket, signed_in) {
+            return Ok(Fetched {
+                status: 429,
+                body: String::new(),
+                elapsed_ms: 0,
+                final_url: url.to_string(),
+                skipped: true,
+            });
+        }
+
+        // Only the Web API is retried after a refusal; the Community, inventory
+        // and Market limits get longer if you keep asking.
+        let api_waits: &[u64] = &[5, 15];
         let mut attempt = 0usize;
         let mut retried_network = false;
         loop {
             self.pace(bucket).await;
             self.requests.fetch_add(1, Ordering::Relaxed);
             let started = Instant::now();
-            match self.http.get(url.clone()).send().await {
+            let mut request = self.http.get(url.clone());
+            if let Some(c) = cookie {
+                request = request.header(reqwest::header::COOKIE, c);
+            }
+            match request.send().await {
                 Err(err) => {
                     if !retried_network && (err.is_timeout() || err.is_connect()) {
                         retried_network = true;
@@ -179,14 +223,19 @@ impl SteamClient {
                 }
                 Ok(resp) => {
                     let status = resp.status().as_u16();
-                    if status == 429 && attempt < waits.len() {
-                        let wait = waits[attempt];
-                        attempt += 1;
-                        notify(format!(
-                            "Steam asked the app to slow down. Waiting {wait} seconds before trying again…"
-                        ));
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                        continue;
+                    if status == 429 {
+                        if bucket == Bucket::WebApi && attempt < api_waits.len() {
+                            let wait = api_waits[attempt];
+                            attempt += 1;
+                            notify(format!(
+                                "Steam asked the app to slow down. Waiting {wait} seconds…"
+                            ));
+                            tokio::time::sleep(Duration::from_secs(wait)).await;
+                            continue;
+                        }
+                        if bucket != Bucket::WebApi {
+                            self.block(bucket, signed_in);
+                        }
                     }
                     let final_url = resp.url().to_string();
                     let body = resp.text().await.map_err(|e| network_message(&e))?;
@@ -195,6 +244,7 @@ impl SteamClient {
                         body,
                         elapsed_ms: started.elapsed().as_millis() as u64,
                         final_url,
+                        skipped: false,
                     });
                 }
             }
@@ -203,7 +253,7 @@ impl SteamClient {
 
     pub async fn check_api_key(&self, key: &str, notify: Notify<'_>) -> Result<(), String> {
         let url = webapi_url("/ISteamWebAPIUtil/GetSupportedAPIList/v1/", &[("key", key)]);
-        let f = self.fetch(Bucket::WebApi, &url, notify).await?;
+        let f = self.fetch(Bucket::WebApi, &url, None, notify).await?;
         match f.status {
             200 => Ok(()),
             401 | 403 => Err(
@@ -226,7 +276,7 @@ impl SteamClient {
             "/ISteamUser/ResolveVanityURL/v1/",
             &[("key", key), ("vanityurl", name)],
         );
-        let v = expect_json(&self.fetch(Bucket::WebApi, &url, notify).await?)?;
+        let v = expect_json(&self.fetch(Bucket::WebApi, &url, None, notify).await?)?;
         let resp = &v["response"];
         match resp["success"].as_u64() {
             Some(1) => resp["steamid"]
@@ -249,7 +299,7 @@ impl SteamClient {
             "/ISteamUser/GetPlayerSummaries/v2/",
             &[("key", key), ("steamids", steam_id)],
         );
-        let v = expect_json(&self.fetch(Bucket::WebApi, &url, notify).await?)?;
+        let v = expect_json(&self.fetch(Bucket::WebApi, &url, None, notify).await?)?;
         parse_player_summary(&v, steam_id).ok_or_else(|| {
             "Steam couldn't find that profile. Check the link and try again.".to_string()
         })
@@ -271,7 +321,7 @@ impl SteamClient {
                 ("skip_unvetted_apps", "false"),
             ],
         );
-        let v = expect_json(&self.fetch(Bucket::WebApi, &url, notify).await?)?;
+        let v = expect_json(&self.fetch(Bucket::WebApi, &url, None, notify).await?)?;
         Ok(parse_owned_games(&v))
     }
 
@@ -285,16 +335,18 @@ impl SteamClient {
             "/IPlayerService/GetBadges/v1/",
             &[("key", key), ("steamid", steam_id)],
         );
-        let v = expect_json(&self.fetch(Bucket::WebApi, &url, notify).await?)?;
+        let v = expect_json(&self.fetch(Bucket::WebApi, &url, None, notify).await?)?;
         Ok(parse_badges(&v))
     }
 
     /// One page (up to 2,000 items) of the Steam Community inventory, which holds
-    /// cards, emoticons, backgrounds, boosters and gems.
+    /// cards, emoticons, backgrounds, boosters and gems. Pass the sign-in cookie
+    /// to read your own inventory as yourself.
     pub async fn inventory_page(
         &self,
         steam_id: &str,
         start: Option<&str>,
+        cookie: Option<&str>,
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
         let mut params = vec![("l", "english"), ("count", "2000")];
@@ -302,8 +354,41 @@ impl SteamClient {
             params.push(("start_assetid", s));
         }
         let url = community_url(&format!("/inventory/{steam_id}/753/6"), &params);
-        self.fetch(Bucket::Community, &url, notify).await
+        self.fetch(Bucket::Inventory, &url, cookie, notify).await
     }
+
+    /// The same inventory through Steam's newer Web API, which needs a sign-in
+    /// token but has far more generous limits. The answer's `response` object has
+    /// the same assets/descriptions layout as the community inventory.
+    pub async fn inventory_api_page(
+        &self,
+        access_token: &str,
+        steam_id: &str,
+        start: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        let mut params = vec![
+            ("access_token", access_token),
+            ("steamid", steam_id),
+            ("appid", "753"),
+            ("contextid", "6"),
+            ("get_descriptions", "true"),
+            ("language", "english"),
+            ("count", "2000"),
+        ];
+        if let Some(s) = start {
+            params.push(("start_assetid", s));
+        }
+        let url = webapi_url(
+            "/IEconService/GetInventoryItemsWithDescriptions/v1/",
+            &params,
+        );
+        self.fetch(Bucket::WebApi, &url, None, notify).await
+    }
+}
+
+pub fn store_url(path: &str, params: &[(&str, &str)]) -> Url {
+    build_url(STORE, path, params)
 }
 
 pub fn webapi_url(path: &str, params: &[(&str, &str)]) -> Url {

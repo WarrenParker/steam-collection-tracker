@@ -1,9 +1,13 @@
-//! Self-updating from GitHub Releases.
+//! Updates and version switching, from GitHub Releases.
 //!
-//! Each release carries `SteamCollectionTracker.exe` and a `.sha256` file. The
-//! app downloads the new exe, checks it against the published hash, and swaps
-//! it in place of the running one (Windows allows renaming a running exe). The
-//! next launch runs the new version; "Restart now" just relaunches early.
+//! Versions follow semantic versioning (MAJOR.MINOR.PATCH). Each release carries
+//! `SteamCollectionTracker.exe` and a `.sha256` file. The app downloads the exe,
+//! checks it against the published hash, and swaps it in place of the running
+//! one (Windows allows renaming a running exe). The next launch runs the new
+//! version; "Restart now" relaunches straight away.
+//!
+//! Any published version can be installed, including older ones. Installing an
+//! older version turns automatic updates off so the app stays on it.
 
 use std::time::Duration;
 
@@ -20,6 +24,8 @@ pub const ASSET_NAME: &str = "SteamCollectionTracker.exe";
 
 /// Set by the GitHub build ("owner/repo"). Local builds have no updater.
 const REPO: Option<&str> = option_env!("UPDATE_REPO");
+/// The commit this copy was built from, set by the GitHub build.
+const BUILD_SHA: Option<&str> = option_env!("GITHUB_SHA");
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct UpdateState {
@@ -33,8 +39,37 @@ pub struct UpdateState {
     pub error: Option<String>,
 }
 
+/// One published version, for the version history list.
+#[derive(Serialize, Clone, Debug)]
+pub struct ReleaseInfo {
+    pub version: String,
+    pub notes: String,
+    pub published_at: Option<String>,
+    pub prerelease: bool,
+    pub installable: bool,
+    pub current: bool,
+    pub newer: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct VersionList {
+    pub current: String,
+    pub build: Option<String>,
+    pub releases: Vec<ReleaseInfo>,
+}
+
 pub fn enabled() -> bool {
     REPO.is_some() && !cfg!(debug_assertions)
+}
+
+pub fn current_version() -> semver::Version {
+    semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .unwrap_or_else(|_| semver::Version::new(0, 0, 0))
+}
+
+/// Short commit id of this build, like "394d2dd".
+pub fn build_id() -> Option<String> {
+    BUILD_SHA.map(|sha| sha.chars().take(7).collect())
 }
 
 pub fn snapshot(state: &AppState) -> UpdateState {
@@ -59,11 +94,20 @@ fn modify(app: &AppHandle, change: impl FnOnce(&mut UpdateState)) -> UpdateState
     snap
 }
 
+#[derive(Clone, Debug)]
 struct Release {
     version: semver::Version,
     notes: String,
-    exe_url: String,
-    sha_url: String,
+    published_at: Option<String>,
+    prerelease: bool,
+    exe_url: Option<String>,
+    sha_url: Option<String>,
+}
+
+impl Release {
+    fn installable(&self) -> bool {
+        self.exe_url.is_some() && self.sha_url.is_some()
+    }
 }
 
 pub fn parse_tag(tag: &str) -> Option<semver::Version> {
@@ -72,7 +116,7 @@ pub fn parse_tag(tag: &str) -> Option<semver::Version> {
 
 fn parse_release(v: &Value) -> Option<Release> {
     let version = parse_tag(v["tag_name"].as_str()?)?;
-    let assets = v["assets"].as_array()?;
+    let assets = v["assets"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
     let find = |name: &str| {
         assets
             .iter()
@@ -82,14 +126,17 @@ fn parse_release(v: &Value) -> Option<Release> {
     };
     Some(Release {
         version,
-        notes: v["body"].as_str().unwrap_or_default().to_string(),
-        exe_url: find(ASSET_NAME)?,
-        sha_url: find(&format!("{ASSET_NAME}.sha256"))?,
+        notes: v["body"].as_str().unwrap_or_default().trim().to_string(),
+        published_at: v["published_at"].as_str().map(str::to_string),
+        prerelease: v["prerelease"].as_bool().unwrap_or(false),
+        exe_url: find(ASSET_NAME),
+        sha_url: find(&format!("{ASSET_NAME}.sha256")),
     })
 }
 
-async fn latest_release(http: &reqwest::Client, repo: &str) -> Result<Release, String> {
-    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+async fn github_get(http: &reqwest::Client, path: &str) -> Result<Value, String> {
+    let repo = REPO.ok_or_else(|| "Updates are turned off in this copy of the app.".to_string())?;
+    let url = format!("https://api.github.com/repos/{repo}{path}");
     let resp = http
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
@@ -101,18 +148,35 @@ async fn latest_release(http: &reqwest::Client, repo: &str) -> Result<Release, S
         })?;
     let status = resp.status().as_u16();
     if status == 404 {
-        return Err("No updates have been published yet.".to_string());
+        return Err("No versions have been published yet.".to_string());
+    }
+    if status == 403 || status == 429 {
+        return Err("The update server is busy. Try again in a few minutes.".to_string());
     }
     if !(200..300).contains(&status) {
         return Err(format!(
             "The update server answered with code {status}. Try again later."
         ));
     }
-    let v: Value = resp
-        .json()
+    resp.json()
         .await
-        .map_err(|_| "The update information couldn't be read.".to_string())?;
-    parse_release(&v).ok_or_else(|| "The newest release is missing the app file.".to_string())
+        .map_err(|_| "The update information couldn't be read.".to_string())
+}
+
+async fn latest_release(http: &reqwest::Client) -> Result<Release, String> {
+    let v = github_get(http, "/releases/latest").await?;
+    parse_release(&v)
+        .ok_or_else(|| "The newest version's information couldn't be read.".to_string())
+}
+
+async fn all_releases(http: &reqwest::Client) -> Result<Vec<Release>, String> {
+    let v = github_get(http, "/releases?per_page=50").await?;
+    let mut releases: Vec<Release> = v
+        .as_array()
+        .map(|list| list.iter().filter_map(parse_release).collect())
+        .unwrap_or_default();
+    releases.sort_by(|a, b| b.version.cmp(&a.version));
+    Ok(releases)
 }
 
 async fn download_and_stage(
@@ -120,11 +184,17 @@ async fn download_and_stage(
     paths: &AppPaths,
     release: &Release,
 ) -> Result<(), String> {
+    let (Some(exe_url), Some(sha_url)) = (&release.exe_url, &release.sha_url) else {
+        return Err(format!(
+            "Version {} has no app file to install.",
+            release.version
+        ));
+    };
     let failed = |_: reqwest::Error| {
-        "Couldn't download the update. The app will try again the next time it opens.".to_string()
+        "Couldn't download the update. Check your internet connection and try again.".to_string()
     };
     let bytes = http
-        .get(&release.exe_url)
+        .get(exe_url)
         .timeout(Duration::from_secs(600))
         .send()
         .await
@@ -135,7 +205,7 @@ async fn download_and_stage(
         .await
         .map_err(failed)?;
     let expected_text = http
-        .get(&release.sha_url)
+        .get(sha_url)
         .timeout(Duration::from_secs(60))
         .send()
         .await
@@ -154,15 +224,13 @@ async fn download_and_stage(
     let actual = hexutil::encode(&Sha256::digest(&bytes));
     if expected.len() != 64 || expected != actual {
         return Err(
-            "The downloaded update didn't pass its safety check, so it wasn't installed."
-                .to_string(),
+            "The download didn't pass its safety check, so it wasn't installed.".to_string(),
         );
     }
 
     let file = paths.update_dir().join("SteamCollectionTracker.new.exe");
-    std::fs::write(&file, &bytes).map_err(|e| format!("Couldn't save the update: {e}"))?;
-    let result =
-        self_replace::self_replace(&file).map_err(|e| format!("Couldn't install the update: {e}"));
+    std::fs::write(&file, &bytes).map_err(|e| format!("Couldn't save the download: {e}"))?;
+    let result = self_replace::self_replace(&file).map_err(|e| format!("Couldn't install it: {e}"));
     let _ = std::fs::remove_file(&file);
     result
 }
@@ -170,14 +238,9 @@ async fn download_and_stage(
 /// Checks GitHub for a newer version. Downloads it when automatic updates are
 /// on, or when `force_download` is set (the user pressed "Update now").
 pub async fn check(app: &AppHandle, force_download: bool) -> UpdateState {
-    let Some(repo) = REPO else {
+    if !enabled() {
         return modify(app, |s| {
             s.error = Some("Updates are turned off in this copy of the app.".to_string())
-        });
-    };
-    if cfg!(debug_assertions) {
-        return modify(app, |s| {
-            s.error = Some("Updates are turned off in development builds.".to_string())
         });
     }
 
@@ -187,10 +250,8 @@ pub async fn check(app: &AppHandle, force_download: bool) -> UpdateState {
     });
     let state = app.state::<AppState>();
     let http = state.steam.http().clone();
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
-        .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
 
-    let release = match latest_release(&http, repo).await {
+    let release = match latest_release(&http).await {
         Ok(r) => r,
         Err(e) => {
             return modify(app, |s| {
@@ -200,7 +261,7 @@ pub async fn check(app: &AppHandle, force_download: bool) -> UpdateState {
         }
     };
 
-    let newer = release.version > current;
+    let newer = release.version > current_version();
     let latest = release.version.to_string();
     let notes = release.notes.clone();
     modify(app, |s| {
@@ -226,7 +287,47 @@ pub async fn check(app: &AppHandle, force_download: bool) -> UpdateState {
     modify(app, |s| s.checking = false)
 }
 
-pub async fn install_and_restart(app: &AppHandle) -> Result<(), String> {
+/// Every published version, newest first.
+pub async fn versions(app: &AppHandle) -> Result<VersionList, String> {
+    let state = app.state::<AppState>();
+    let current = current_version();
+    let releases = if enabled() {
+        all_releases(state.steam.http()).await?
+    } else {
+        Vec::new()
+    };
+    Ok(VersionList {
+        current: current.to_string(),
+        build: build_id(),
+        releases: releases
+            .into_iter()
+            .map(|r| ReleaseInfo {
+                version: r.version.to_string(),
+                installable: r.installable(),
+                current: r.version == current,
+                newer: r.version > current,
+                notes: r.notes,
+                published_at: r.published_at,
+                prerelease: r.prerelease,
+            })
+            .collect(),
+    })
+}
+
+fn restart(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let exe = state.exe_path.clone().ok_or_else(|| {
+        "Couldn't restart automatically. Close the app and open it again to finish.".to_string()
+    })?;
+    std::process::Command::new(&exe).spawn().map_err(|e| {
+        format!("Couldn't restart automatically ({e}). Close the app and open it again to finish.")
+    })?;
+    app.exit(0);
+    Ok(())
+}
+
+/// Installs the newest version (if not already downloaded) and restarts.
+pub async fn install_latest_and_restart(app: &AppHandle) -> Result<(), String> {
     let ready = {
         let state = app.state::<AppState>();
         let ready = state.update.lock().unwrap_or_else(|e| e.into_inner()).ready;
@@ -240,18 +341,35 @@ pub async fn install_and_restart(app: &AppHandle) -> Result<(), String> {
                 .unwrap_or_else(|| "You're already on the newest version.".to_string()));
         }
     }
+    restart(app)
+}
+
+/// Installs a specific version (newer or older) and restarts.
+pub async fn install_version_and_restart(app: &AppHandle, version: &str) -> Result<(), String> {
+    if !enabled() {
+        return Err("Updates are turned off in this copy of the app.".to_string());
+    }
+    let wanted =
+        parse_tag(version).ok_or_else(|| format!("\"{version}\" isn't a version number."))?;
+    let current = current_version();
+    if wanted == current {
+        return Err(format!("You're already on version {current}."));
+    }
     let state = app.state::<AppState>();
-    let exe = state.exe_path.clone().ok_or_else(|| {
-        "Couldn't find the app's file to restart it. Close and reopen the app to finish updating."
-            .to_string()
-    })?;
-    std::process::Command::new(&exe).spawn().map_err(|e| {
-        format!(
-            "Couldn't restart automatically ({e}). Close and reopen the app to finish updating."
-        )
-    })?;
-    app.exit(0);
-    Ok(())
+    let release = all_releases(state.steam.http())
+        .await?
+        .into_iter()
+        .find(|r| r.version == wanted)
+        .ok_or_else(|| format!("Version {wanted} isn't available to download."))?;
+    download_and_stage(state.steam.http(), &state.paths, &release).await?;
+    if wanted < current {
+        // Otherwise the next launch would update straight back to the newest version.
+        state.update_settings(|s| {
+            s.auto_update = false;
+            Ok(())
+        })?;
+    }
+    restart(app)
 }
 
 pub fn spawn_startup_check(app: AppHandle) {
@@ -263,15 +381,6 @@ pub fn spawn_startup_check(app: AppHandle) {
         tokio::time::sleep(Duration::from_secs(4)).await;
         let _ = check(&app, false).await;
     });
-}
-
-/// Removes any half-finished download from a previous run.
-pub fn cleanup_leftovers(paths: &AppPaths) {
-    if let Ok(entries) = std::fs::read_dir(paths.root.join("update")) {
-        for entry in entries.flatten() {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -288,9 +397,9 @@ mod tests {
     }
 
     #[test]
-    fn release_needs_both_files() {
+    fn releases() {
         let full = json!({
-            "tag_name": "v0.2.0", "body": "Notes",
+            "tag_name": "v0.2.0", "body": " Notes ", "published_at": "2026-10-22T07:00:00Z",
             "assets": [
                 {"name": "SteamCollectionTracker.exe", "browser_download_url": "https://example.com/a.exe"},
                 {"name": "SteamCollectionTracker.exe.sha256", "browser_download_url": "https://example.com/a.sha256"}
@@ -298,12 +407,14 @@ mod tests {
         });
         let r = parse_release(&full).unwrap();
         assert_eq!(r.version, semver::Version::new(0, 2, 0));
-        assert_eq!(r.exe_url, "https://example.com/a.exe");
+        assert_eq!(r.notes, "Notes");
+        assert!(r.installable());
 
         let missing_hash = json!({
             "tag_name": "v0.2.0",
             "assets": [{"name": "SteamCollectionTracker.exe", "browser_download_url": "https://example.com/a.exe"}]
         });
-        assert!(parse_release(&missing_hash).is_none());
+        assert!(!parse_release(&missing_hash).unwrap().installable());
+        assert!(parse_release(&json!({"tag_name": "nightly"})).is_none());
     }
 }

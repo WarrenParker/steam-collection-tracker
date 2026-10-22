@@ -25,3 +25,33 @@ export function duration(ms: number): string {
   const rest = total % 60;
   return rest ? `${plural(minutes, 'minute')} ${plural(rest, 'second')}` : plural(minutes, 'minute');
 }
+
+export function date(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function bytes(n: number): string {
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export type NoteBlock = { kind: 'heading' | 'item' | 'text'; text: string };
+
+/** Turns simple Markdown release notes into blocks, without rendering HTML. */
+export function noteBlocks(markdown: string): NoteBlock[] {
+  const clean = (t: string) => t.replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line): NoteBlock => {
+      if (/^#{1,6}\s/.test(line)) return { kind: 'heading', text: clean(line.replace(/^#+\s*/, '')) };
+      if (/^[-*]\s/.test(line)) return { kind: 'item', text: clean(line.slice(2)) };
+      return { kind: 'text', text: clean(line) };
+    });
+}
