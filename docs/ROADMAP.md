@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.5.1. Phase 2 is done; Phase 3 is next.
+**Now:** version 0.6.2. Phase 3 is done; Phase 4 is next.
 
 ## Goal
 
@@ -39,14 +39,15 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Availability detection from the Points Shop's dates, items that can't be bought on their own, bundles and sale events, with a manual override per item. Unobtainable items are tagged but left out of the percentage, and old items Steam no longer lists appear only if you own them. [0.5.0](../CHANGELOG.md#050---2026-10-22)
 - ✅ Owned items matched by game, item class, item number and foil, falling back to the name when Steam doesn't give the number. [0.5.0](../CHANGELOG.md#050---2026-10-22)
 
-## Phase 3: Prices
+## Phase 3: Prices (done)
 
-- ⬜ Current, lowest historical and average price for every item.
-- ⬜ Price spike and Price dip tags with adjustable sensitivity.
-- ⬜ Confirm which items are marketable from the Market itself, replacing the rule of thumb behind the Points and Not marketable tags.
-- ⬜ Currency setting, USD by default.
-- ⬜ Account value before market fees.
-- ⬜ Cost to complete, with dollars and points shown separately.
+- ✅ Current, lowest historical and average price for every item, with price history read in the background and stored compactly, and the full history on request. [0.6.0](../CHANGELOG.md#060---2026-10-22)
+- ✅ Price spike and Price dip tags with adjustable sensitivity: 25% from the average and at least 5 cents by default. [0.6.0](../CHANGELOG.md#060---2026-10-22)
+- ✅ Which items are marketable comes from the Market itself, replacing the rule of thumb behind the Points and Not marketable tags. Retired emoticons and backgrounds still for sale on the Market count toward completion. [0.6.0](../CHANGELOG.md#060---2026-10-22)
+- ✅ Currency setting, USD by default, with daily exchange rates for other currencies. [0.6.0](../CHANGELOG.md#060---2026-10-22)
+- ✅ Account value before market fees, with items that can't be sold shown as a points value. [0.6.0](../CHANGELOG.md#060---2026-10-22)
+- ✅ Cost to complete, with money and points shown separately, the order book for cards that need several copies, and listings far above an item's usual price counted at its usual price. [0.6.1](../CHANGELOG.md#061---2026-10-22)
+- ✅ Long Market reads paced to stay under the rate Steam refuses. [0.6.2](../CHANGELOG.md#062---2026-10-22)
 
 ## Phase 4: Interface
 
@@ -55,8 +56,9 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ⬜ Full settings panel.
 - ⬜ Virtualized lists, so tens of thousands of items stay smooth.
 
-## Phase 5: History and banner
+## Phase 5: Shared prices, history and banner
 
+- ⬜ Shared price file. The owner's app publishes the prices and price history it reads as one small file on GitHub each day, and every copy of the app downloads it first, so it only asks Steam for what the file doesn't cover.
 - ⬜ Progress-over-time chart for your account.
 - ⬜ Banner generator that exports a PNG of your progress and stats.
 
@@ -76,4 +78,5 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - **The catalog doesn't need the market.** Card pages and the Points Shop describe every item in a set, so the market is only needed for prices.
 - **Sign-in is recommended.** Steam refuses inventory and market requests from apps that aren't signed in. Sign-in happens on Steam's own page, and the app never handles the password.
 - **Plain language everywhere.** Every message says what happened and what to do next.
+- **How prices count.** Value counts only copies you can sell, at today's cheapest listing, before fees. Cost to complete uses the cheapest listings (walking up the order book for several copies), points for items only the Points Shop sells, and an item's 90-day average when it's listed at more than three times that. The average price covers 30 days by default.
 - **How completion counts.** Booster packs don't count. Each card needs five copies' worth, from badge levels and copies held. Reward items that can't be bought on their own are tagged Limited and still count unless marked Unobtainable. The account figure covers owned games, plus Steam Family games when that setting is on.

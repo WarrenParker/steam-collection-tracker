@@ -30,7 +30,9 @@ src-tauri/                    The engine
   src/steam/                  Paced Steam client, response parsing, inventory reading
   src/catalog/                Reading each item source into one catalog shape
   src/db.rs                   The collection database: schema, saving and queries
-  src/completion.rs           Completion per game and account, tags and availability
+  src/completion.rs           Completion, tags, availability, value and cost to complete
+  src/prices.rs               The scan's Market stages, price history and exchange rates
+  src/market/                 Market answers, currencies, order books, price history math
   src/scan.rs                 The background scan, its stages, pausing and estimates
   src/session.rs              Steam sign-in, renewal and sign-out
   src/diagnostics.rs          The connection test and its report
@@ -77,6 +79,7 @@ The sign-in cookies are kept. Version 0.2.0's `cache/last_scan.json` is moved in
 | `profile_items` | Emoticons and profile items from the signed-in user's account, including Points Shop purchases. |
 | `badges` | The user's badges and levels. |
 | `item_overrides` | Availability the user set by hand, keyed by item. Kept across scans. |
+| `market` | One row per item on the Market, keyed by its Market name: the cheapest listing and how many are listed, a summary of its price history (averages over 30 days, 90 days, a year and all time; lowest and highest days; sales in the last 30 days), the last year of history in a compact form, and the order book's cheapest levels. Prices are kept in thousandths of the currency (mills). |
 | `scans` | One row per scan, with the overview summary it produced. |
 | `meta` | Small values, such as which catalog route works on this connection. |
 
@@ -84,14 +87,16 @@ The schema version is kept in SQLite's `user_version`. A database the app can't 
 
 ## The scan
 
-A scan runs in the background in four stages. Progress is saved as it goes, so a scan can be paused, or the app closed, and continued later.
+A scan runs in the background in six stages. Progress is saved as it goes, so a scan can be paused, or the app closed, and continued later.
 
 1. **Library:** profile, owned games, badges, inventory, achievement progress and, when signed in, the Steam Family library and profile items.
 2. **Store check:** which games have trading cards (the store's category 29) and names for games the user doesn't own. 100 games per request.
 3. **Points Shop:** every item each game sells for points, 20 games per request, plus the list of apps that are Steam sale events. Each batch is read twice, with and without items that can't be bought directly, to tell sale rewards from items for sale. Games where the user owns an item no list includes are read again, at most once a day.
 4. **Item catalog:** each card game's card set, from its card page. The page numbers cards by their place in the set, so the app takes Steam's real item numbers from any card the user owns. Emoticons and backgrounds come from the Points Shop stage, and every game with cards also gets its booster pack.
+5. **Market prices:** each card game that counts for the account, and any game the user holds a sellable item from, searched on the Market ten items per request, with each item's cheapest listing.
+6. **Order books and price history:** the order book of every card that still needs two or more copies, then each item's price history. The first full read of price history waits for the user to continue it, with a time estimate.
 
-Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30. A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page requests, the scan stops, waits 30 minutes, and carries on by itself while the app is open. Only one copy of the app runs at a time; opening it again brings the existing window forward.
+Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30, Market prices after 20 hours, order books after 6 days, and each price history about a month after it was read (23 to 37 days, spread by the item's name so a few fall due each day). A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page requests, the scan stops, waits 30 minutes, and carries on by itself while the app is open. Only one copy of the app runs at a time; opening it again brings the existing window forward.
 
 ## Completion
 
@@ -102,7 +107,21 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 - **What counts.** Every catalog item except booster packs and items that are Unobtainable. A game's percentage is the share of its counted items owned, with cards counted by their share of copies.
 - **Account.** Games owned, plus Steam Family games when that setting is on. The headline weighs every item equally; the average game weighs every game equally, including games at 0%.
 - **Availability.** Cards and booster packs are available. A Points Shop item is Unobtainable when Steam marks it inactive or its end date has passed, and Limited when it has a future end or start date, can't be bought on its own (sale rewards, event items), or belongs to a Steam sale event. Owned items no list includes are Unobtainable once their game's Points Shop has been read. The user's override wins.
-- **Tags.** Unowned and Family shared come from the game. Points means the item is sold for points and not on the Market. Not marketable covers Points Shop exclusives; cards, booster packs and a card set's emoticons and backgrounds are marketable, and a copy the user can sell settles it. Unverified marks items matched by name, and owned items whose game list hasn't been read yet.
+- **Tags.** Unowned and Family shared come from the game. Points means the item is sold for points and not on the Market. Not marketable means the game's Market search didn't list it (cards and booster packs always count as marketable, and a copy the user can sell settles it); before a game's first Market search, cards, booster packs and a card set's emoticons and backgrounds are taken to be marketable. Unverified marks items matched by name, and owned items whose game list hasn't been read yet. Price spike and Price dip are below.
+
+## Prices
+
+`completion.rs` also works out prices whenever the interface asks, from the `market` table.
+
+- **Matching.** Market items are tied to catalog items by the Market name of a copy the user holds, then by item number when Steam adds one to tell items with the same name apart ("…(Profile Background)-13"), then by game, kind and name (Steam adds suffixes like "(Profile Background)" to tell items apart; they're dropped). Each game has one booster pack. Emoticons and backgrounds the Market lists but no other source does are added to their game's list.
+- **Retired items.** An item Steam no longer hands out counts as available while someone is selling it on the Market, and Unobtainable when nobody is.
+- **Current price** is the cheapest listing in the game's latest Market search. Items the latest search didn't list aren't for sale right now.
+- **Average** is the volume-weighted average sale price over the span chosen in Settings (30 days by default). **Price spike** and **Price dip** tag items whose cheapest listing is at least 25% above or below that average and by at least 5 cents; both numbers are settings.
+- **Account value** counts copies the user can sell, at the cheapest listing (or the average when nothing is listed), before Steam's fees. It covers every listed game and Steam's own items, such as sacks of gems. Items that can't be sold are shown separately as a points value, at their Points Shop price.
+- **Cost to complete** covers what each counted item still needs. Items on the Market are priced in money: one copy at the cheapest listing, several copies by walking up the order book when one was read in the last 7 days, otherwise at the cheapest listing and marked as estimated. Items only the Points Shop sells are priced in points. Items sold both ways count in money, and the points they'd cost instead are shown alongside. Items nobody sells right now are counted as unpriced.
+- **Outliers.** A listing more than three times an item's usual price (its 90-day average sale price, or its 1-year average when nothing sold in 90 days) counts at the usual price in cost to complete and value, and is marked as estimated. A background listed at $876.48 that last sold for $2.26 made up most of a real account's cost to complete before this rule.
+- **Price history** is fetched whole (Steam has no way to ask for part of it), turned into one point per day, summarised, and stored as the last year: daily for 90 days, weekly before that, packed into a few bytes per point. "Show full history" fetches it again and shapes it for a chart (daily for 90 days, weekly for two years, then monthly).
+- **Currency.** Steam answers in the account's currency, which the app learns from the Market. Other currencies are converted with daily exchange rates from api.frankfurter.dev, read only when another currency is chosen.
 
 ## Talking to Steam
 
@@ -118,6 +137,7 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 
 - Community, inventory, Store and Market requests identify as the browser built into the app (the interface reports WebView2's own identity at startup) and send browser headers. Steam turns the Market away otherwise.
 - When Steam refuses a request (HTTP 429), the client stops sending that kind for 30 minutes instead of retrying. Only Web API calls are retried. The details are in [STEAM-DATA.md](STEAM-DATA.md).
+- **Market budget.** On top of the 4-second gap, Market requests draw from a budget (`steam/budget.rs`): a burst of 60 goes out at the normal pace, then about one every 7.5 seconds (480 an hour). A refusal makes the pace half again as slow, up to one every 30 seconds, and the slower pace is saved in the database's `meta` table for later runs.
 - **Sign-in** opens Steam's own sign-in page in a second window, which shares the WebView2 profile. When the `steamLoginSecure` cookie appears, the app reads it through Tauri's cookie API and closes the window.
 - **Renewal.** When the cookie is about to expire, the app loads a Steam page in a hidden window, and Steam renews the session itself.
 - **Sign-out** loads Steam in a hidden window and posts to `/login/logout/`, so Steam revokes the session on its side too.
