@@ -18,7 +18,7 @@ use crate::steam::inventory::InvRow;
 use crate::steam::{Badge, OwnedGame};
 
 pub const FILE_NAME: &str = "collection.db";
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// The app's own "game" for Steam-wide items such as gems.
 pub const STEAM_APP: i64 = 753;
@@ -127,6 +127,15 @@ PRAGMA user_version = 1;
 COMMIT;
 "#;
 
+/// 0.3.1: catalogs read from card pages in 0.3.0 numbered cards by their place
+/// in the set. They're read again so the numbers match Steam's.
+const MIGRATE_V2: &str = "
+BEGIN;
+UPDATE apps SET catalog_checked_at = NULL WHERE catalog_source = 'card_page';
+PRAGMA user_version = 2;
+COMMIT;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -158,6 +167,8 @@ impl Db {
     pub fn in_memory() -> Self {
         let conn = Connection::open_in_memory().expect("an in-memory database always opens");
         conn.execute_batch(SCHEMA_V1).expect("the schema is valid");
+        conn.execute_batch(MIGRATE_V2)
+            .expect("the migration is valid");
         Self {
             conn: Mutex::new(conn),
         }
@@ -192,6 +203,9 @@ fn try_open(path: &Path) -> Result<Connection, String> {
     }
     if version < 1 {
         conn.execute_batch(SCHEMA_V1).map_err(|e| e.to_string())?;
+    }
+    if version < 2 {
+        conn.execute_batch(MIGRATE_V2).map_err(|e| e.to_string())?;
     }
     Ok(conn)
 }
@@ -484,6 +498,9 @@ pub struct CatalogTarget {
     pub has_cards: Option<bool>,
     /// The user has a badge or card-set items for the game, so it has cards.
     pub evidence: bool,
+    /// The catalog is up to date but came from the card page; it's only
+    /// worth reading again through Steam's item list.
+    pub upgrade_only: bool,
 }
 
 impl CatalogTarget {
@@ -494,27 +511,32 @@ impl CatalogTarget {
     }
 }
 
-/// Listed games whose catalog is missing or older than `before`.
+/// Listed games whose catalog is missing or older than `before`, plus, when
+/// `upgrade` is set, games whose catalog came from a card page.
 pub fn catalog_targets(
     c: &Connection,
     family: bool,
     before: i64,
+    upgrade: bool,
 ) -> rusqlite::Result<Vec<CatalogTarget>> {
     let sql = format!(
         "SELECT a.appid, a.has_cards,
              EXISTS (SELECT 1 FROM badges b WHERE b.appid = a.appid)
-             OR EXISTS (SELECT 1 FROM inventory i WHERE i.appid = a.appid AND i.class IN (2, 3, 4, 5))
+             OR EXISTS (SELECT 1 FROM inventory i WHERE i.appid = a.appid AND i.class IN (2, 3, 4, 5)),
+             NOT (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2)
          FROM apps a
          WHERE {LISTED} AND a.event_app = 0
-           AND (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2)
+           AND (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2
+                OR (?3 AND a.catalog_source = 'card_page'))
          ORDER BY a.owned DESC, a.has_items DESC, a.appid"
     );
     let mut st = c.prepare(&sql)?;
-    let rows = st.query_map(params![family, before], |r| {
+    let rows = st.query_map(params![family, before, upgrade], |r| {
         Ok(CatalogTarget {
             appid: r.get::<_, i64>(0)? as u64,
             has_cards: r.get::<_, Option<i64>>(1)?.map(|v| v != 0),
             evidence: r.get::<_, i64>(2)? != 0,
+            upgrade_only: r.get::<_, i64>(3)? != 0,
         })
     })?;
     rows.collect()
@@ -598,6 +620,16 @@ pub fn save_catalog(
         params![app, t, source, has_cards],
     )?;
     Ok(())
+}
+
+/// Names and Steam item numbers of the cards the user owns for a game.
+pub fn owned_card_types(c: &Connection, appid: u64) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut st = c.prepare(
+        "SELECT name, item_type FROM inventory
+         WHERE appid = ?1 AND class = 2 AND name IS NOT NULL AND item_type IS NOT NULL",
+    )?;
+    let rows = st.query_map([appid as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
 }
 
 pub fn save_catalog_error(c: &Connection, appid: u64, error: &str) -> rusqlite::Result<()> {
@@ -926,7 +958,9 @@ mod tests {
             )
         })
         .unwrap();
-        let targets = db.read(|c| catalog_targets(c, false, now())).unwrap();
+        let targets = db
+            .read(|c| catalog_targets(c, false, now(), false))
+            .unwrap();
         let wanted: Vec<u64> = targets
             .iter()
             .filter(|t| t.wanted(false))
@@ -991,6 +1025,42 @@ mod tests {
             .unwrap();
         let counts = db.read(|c| catalog_counts(c, false)).unwrap();
         assert_eq!(counts.items, 4);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_targets_card_page_catalogs() {
+        let (db, dir) = temp_db("upgrade");
+        let owned = vec![OwnedGame {
+            appid: 440,
+            name: "Team Fortress 2".into(),
+            playtime_minutes: 1,
+        }];
+        let item_apps = BTreeMap::new();
+        db.write(|tx| {
+            save_library(
+                tx,
+                &LibraryUpdate {
+                    owned: Some(&owned),
+                    family: None,
+                    item_apps: &item_apps,
+                    reset_items: true,
+                },
+            )?;
+            save_catalog(tx, 440, &[card(1, false), card(1, true)], "card_page")
+        })
+        .unwrap();
+        let stale_before = now() - 30 * 24 * 3600;
+        assert!(db
+            .read(|c| catalog_targets(c, false, stale_before, false))
+            .unwrap()
+            .is_empty());
+        let upgrade = db
+            .read(|c| catalog_targets(c, false, stale_before, true))
+            .unwrap();
+        assert_eq!(upgrade.len(), 1);
+        assert!(upgrade[0].upgrade_only);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

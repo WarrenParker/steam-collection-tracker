@@ -59,6 +59,7 @@ const MAX_INVENTORY_PAGES: u32 = 200;
 const META_LIBRARY_READ: &str = "library_read_at";
 const META_ELIGIBLE_READ: &str = "eligible_apps_read_at";
 const META_ROUTE: &str = "catalog_route";
+const META_ROUTE_AT: &str = "catalog_route_set_at";
 
 // ---- The overview summary ---------------------------------------------------
 
@@ -339,7 +340,7 @@ fn backlog(state: &AppState) -> (u64, Option<u64>, bool) {
     let slow = route.as_deref() == Some(Route::CARD_PAGES);
     let targets = state
         .db
-        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY))
+        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY, false))
         .unwrap_or_default();
     let remaining = targets.iter().filter(|t| t.wanted(!slow)).count() as u64;
     let per_game = if slow { SLOW_SECONDS } else { FAST_SECONDS };
@@ -729,10 +730,17 @@ async fn catalog_stages(
     }
 
     // Stage 4: each game's item catalog.
-    let mut slow =
-        data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref() == Some(Route::CARD_PAGES);
+    // Card pages are the fallback. A day after falling back, the next scan
+    // tries Steam's item list again, since the reason may have gone away.
+    let route_set_at = data
+        .read(|c| db::get_meta(c, META_ROUTE_AT))?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let mut slow = data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref()
+        == Some(Route::CARD_PAGES)
+        && db::now() - route_set_at < DAY;
     let targets: Vec<CatalogTarget> = data
-        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY))?
+        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY, !slow))?
         .into_iter()
         .filter(|t| t.wanted(!slow))
         .collect();
@@ -761,6 +769,11 @@ async fn catalog_stages(
     for (i, target) in targets.iter().enumerate() {
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
+        }
+        if slow && target.upgrade_only {
+            // Only worth reading through Steam's item list, which isn't working.
+            ctx.progress(i as u64 + 1, None);
+            continue;
         }
         let game_started = Instant::now();
         let has_cards = target.has_cards == Some(true) || target.evidence;
@@ -799,7 +812,10 @@ async fn catalog_stages(
             }
             if empty_defs >= EMPTY_DEFS_LIMIT {
                 slow = true;
-                data.write(|tx| db::set_meta(tx, META_ROUTE, Route::CARD_PAGES))?;
+                data.write(|tx| {
+                    db::set_meta(tx, META_ROUTE, Route::CARD_PAGES)?;
+                    db::set_meta(tx, META_ROUTE_AT, &db::now().to_string())
+                })?;
                 ctx.state.scan.set(ctx.app, |s| s.slow_route = true);
                 let left = targets.len() - i;
                 if !resume && first_catalog && estimate(left, true) > CONFIRM_SECONDS {
@@ -827,6 +843,8 @@ async fn catalog_stages(
             }
             let page = cardpage::parse(&f.body);
             let mut items = cardpage::to_items(&page);
+            let known = data.read(|c| db::owned_card_types(c, target.appid))?;
+            cardpage::apply_known_types(&mut items, &known);
             items.extend(extra.drain(..).filter(|x| x.class != class::CARD));
             found = Some((items, Route::CARD_PAGES));
         }

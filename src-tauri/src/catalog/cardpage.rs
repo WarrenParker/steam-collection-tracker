@@ -132,6 +132,43 @@ pub fn to_items(page: &CardPage) -> Vec<CatalogItem> {
         .collect()
 }
 
+/// A card's name without the suffixes the inventory adds.
+pub fn base_card_name(name: &str) -> String {
+    let mut n = name.trim();
+    for suffix in [" (Foil Trading Card)", " (Trading Card)", " (Foil)"] {
+        if let Some(stripped) = n.strip_suffix(suffix) {
+            n = stripped.trim_end();
+        }
+    }
+    n.to_lowercase()
+}
+
+/// The card page numbers cards by their place in the set, but Steam's own
+/// item numbers usually start later (a set's cards might be 3 to 8). When the
+/// user owns any of the cards, their inventory gives the real numbers: the
+/// difference is the same for the whole set, so every card can be renumbered.
+/// Returns true when the numbers were corrected.
+pub fn apply_known_types(items: &mut [CatalogItem], known: &[(String, i64)]) -> bool {
+    let mut votes: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    for item in items.iter().filter(|i| i.class == class::CARD && !i.foil) {
+        let Some(title) = item.title.as_deref().map(base_card_name) else {
+            continue;
+        };
+        for (name, item_type) in known {
+            if base_card_name(name) == title {
+                *votes.entry(item_type - item.item_type).or_default() += 1;
+            }
+        }
+    }
+    let Some((offset, _)) = votes.into_iter().max_by_key(|(_, n)| *n) else {
+        return false;
+    };
+    for item in items.iter_mut().filter(|i| i.class == class::CARD) {
+        item.item_type += offset;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +219,32 @@ mod tests {
         let items = to_items(&page);
         assert_eq!(items.len(), 6);
         assert!(items[1].foil && items[1].image.is_none());
+    }
+
+    #[test]
+    fn renumbers_cards_from_owned_ones() {
+        let mut items = to_items(&parse(PAGE));
+        let known = vec![("Tom & Jerry (Trading Card)".to_string(), 5)];
+        assert!(apply_known_types(&mut items, &known));
+        let types: Vec<(i64, bool)> = items.iter().map(|i| (i.item_type, i.foil)).collect();
+        assert_eq!(
+            types,
+            vec![
+                (5, false),
+                (5, true),
+                (6, false),
+                (6, true),
+                (7, false),
+                (7, true)
+            ]
+        );
+        let mut untouched = to_items(&parse(PAGE));
+        assert!(!apply_known_types(
+            &mut untouched,
+            &[("Someone else".to_string(), 9)]
+        ));
+        assert_eq!(untouched[0].item_type, 1);
+        assert_eq!(base_card_name("Out the window (Foil)"), "out the window");
     }
 
     #[test]
