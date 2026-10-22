@@ -98,9 +98,7 @@ pub(crate) async fn stages(
     cookie: Option<&str>,
 ) -> Result<RunEnd, String> {
     let state = ctx.state;
-    let notify = ctx.notify;
     let data = &state.db;
-    let signed_in = cookie.is_some();
     if let Some(ms) = data
         .read(|c| db::get_meta(c, META_MARKET_PERIOD))?
         .and_then(|v| v.parse::<u64>().ok())
