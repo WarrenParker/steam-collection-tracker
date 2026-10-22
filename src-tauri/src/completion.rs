@@ -36,7 +36,7 @@ pub const BADGE_LEVELS: u32 = 5;
 /// Steam's own "game" for account-wide items such as gems.
 const STEAM_APP: u64 = 753;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rules {
     /// Cards need one copy held in the inventory on top of the badge.
     pub keep_card_set: bool,
@@ -61,7 +61,7 @@ impl Rules {
 }
 
 /// How prices are shown and judged.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PriceRules {
     /// The span the average price covers.
     pub window: PriceWindow,

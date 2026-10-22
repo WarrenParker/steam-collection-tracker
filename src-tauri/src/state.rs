@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use crate::completion::{self, Rules, Snapshot};
 use crate::db::{self, Db};
 use crate::paths::AppPaths;
 use crate::scan::ScanControl;
@@ -27,6 +28,16 @@ pub struct AppState {
     pub db_problem: Option<String>,
     /// The background scan.
     pub scan: ScanControl,
+    /// The latest completion figures, reused until the database or the
+    /// rules change, or a minute passes.
+    snapshot: Mutex<Option<(SnapshotKey, Arc<Snapshot>)>>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct SnapshotKey {
+    generation: u64,
+    rules: Rules,
+    minute: i64,
 }
 
 impl AppState {
@@ -46,6 +57,7 @@ impl AppState {
             db,
             db_problem,
             scan: ScanControl::new(),
+            snapshot: Mutex::new(None),
         }
     }
 
@@ -68,6 +80,27 @@ impl AppState {
             .map_err(|e| format!("Couldn't save your settings: {e}"))?;
         *guard = next.clone();
         Ok(next)
+    }
+
+    /// Completion and prices for the whole collection. Working them out reads
+    /// every item, so the result is kept and reused while nothing has changed.
+    /// Items whose availability depends on a date are checked again each minute.
+    pub fn snapshot(&self, rules: Rules) -> Result<Arc<Snapshot>, String> {
+        let now = db::now();
+        let key = SnapshotKey {
+            generation: self.db.generation(),
+            rules,
+            minute: now / 60,
+        };
+        let mut cached = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, snap)) = cached.as_ref() {
+            if *k == key {
+                return Ok(snap.clone());
+            }
+        }
+        let snap = Arc::new(self.db.read(|c| completion::compute(c, rules, now))?);
+        *cached = Some((key, snap.clone()));
+        Ok(snap)
     }
 
     pub fn api_key(&self) -> Result<String, String> {

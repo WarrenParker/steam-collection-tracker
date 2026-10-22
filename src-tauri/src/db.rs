@@ -204,6 +204,8 @@ COMMIT;
 
 pub struct Db {
     conn: Mutex<Connection>,
+    /// Goes up with every saved change, so cached figures know when to refresh.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl Db {
@@ -225,6 +227,7 @@ impl Db {
         };
         Ok(Self {
             conn: Mutex::new(conn),
+            generation: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -241,6 +244,7 @@ impl Db {
             .expect("the migration is valid");
         Self {
             conn: Mutex::new(conn),
+            generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -259,7 +263,14 @@ impl Db {
         let tx = guard.transaction().map_err(db_error)?;
         let out = f(&tx).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(out)
+    }
+
+    /// Counts saved changes since the app started.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

@@ -1773,12 +1773,13 @@ input:focus {
 }
 
 .setting-select {
-  width: auto;
-  max-width: 220px;
+  flex: none;
+  width: 150px;
 }
 
 .setting-pair {
   display: flex;
+  flex: none;
   gap: 6px;
 }
 

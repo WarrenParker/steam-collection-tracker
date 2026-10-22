@@ -184,9 +184,9 @@ fn rules(state: &AppState) -> completion::Rules {
 #[tauri::command]
 pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
     let rules = rules(&state);
+    let snap = state.snapshot(rules)?;
     state.db.read(|c| {
         let mut games = db::games(c, rules.include_family)?;
-        let snap = completion::compute(c, rules, db::now())?;
         for g in &mut games {
             if let Some(done) = snap.games.get(&g.appid) {
                 g.percent = done.percent;
@@ -209,9 +209,7 @@ pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
 #[tauri::command]
 pub fn get_completion(state: State<'_, AppState>) -> Result<AccountCompletion, String> {
     let rules = rules(&state);
-    state
-        .db
-        .read(|c| completion::compute(c, rules, db::now()).map(|s| s.account))
+    Ok(state.snapshot(rules)?.account.clone())
 }
 
 #[derive(Serialize)]
@@ -223,14 +221,11 @@ pub struct GameDetail {
 }
 
 fn game_detail(state: &AppState, appid: u64) -> Result<GameDetail, String> {
-    let rules = rules(state);
-    state.db.read(|c| {
-        let snap = completion::compute(c, rules, db::now())?;
-        Ok(GameDetail {
-            completion: snap.games.get(&appid).cloned(),
-            items: snap.game_items(appid),
-            currency: snap.account.currency.clone(),
-        })
+    let snap = state.snapshot(rules(state))?;
+    Ok(GameDetail {
+        completion: snap.games.get(&appid).cloned(),
+        items: snap.game_items(appid),
+        currency: snap.account.currency.clone(),
     })
 }
 

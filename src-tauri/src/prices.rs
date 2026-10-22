@@ -186,7 +186,7 @@ pub(crate) async fn stages(
     // price histories that are missing or due.
     let now = db::now();
     let rules = completion::Rules::from_settings(&state.settings());
-    let snap = data.read(|c| completion::compute(c, rules, now))?;
+    let snap = state.snapshot(rules)?;
     let books: Vec<String> = snap
         .items
         .iter()

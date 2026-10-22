@@ -212,7 +212,12 @@ pub fn parse_search(v: &Value) -> Option<SearchPage> {
                 type_label,
                 lowest,
                 listings,
-                icon: jsonutil::text(&desc["icon_url"]).filter(|i| i.len() < 400),
+                // An image id is letters, digits, "-" and "_"; anything else is ignored.
+                icon: jsonutil::text(&desc["icon_url"]).filter(|i| {
+                    i.len() < 400
+                        && i.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                }),
             })
         })
         .collect();
@@ -295,7 +300,10 @@ pub fn parse_rates(v: &Value) -> Option<HashMap<String, f64>> {
     let rates: HashMap<String, f64> = list
         .iter()
         .filter_map(|r| {
-            let rate = r["rate"].as_f64().filter(|x| *x > 0.0)?;
+            // A rate outside this range can't be real and would garble prices.
+            let rate = r["rate"]
+                .as_f64()
+                .filter(|x| x.is_finite() && *x > 1e-6 && *x < 1e7)?;
             Some((r["quote"].as_str()?.to_ascii_uppercase(), rate))
         })
         .collect();
