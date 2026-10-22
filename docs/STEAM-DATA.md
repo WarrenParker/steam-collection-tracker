@@ -38,6 +38,7 @@ What the app reads from Steam, where it comes from, and what each connection tes
 
 - Signed in, an item's `owner_actions` include "Turn into Gems" as `javascript:GetGooValue( '%contextid%', '%assetid%', {appid}, {item_type}, {border} )`. That gives the item's type number, which matches the item definitions. Not confirmed on a real inventory yet.
 
+- Points Shop items (stickers, frames, animated avatars, mini profile backgrounds, and emoticons and backgrounds bought with points) have no "Turn into Gems" action, so they carry no type number. The app matches them to the catalog by name, and by number through the profile items list, which always has it.
 - `assets` and `descriptions` are joined on `classid` and `instanceid`. `amount` is a string, and gems come as one stack.
 - An item's type is its `item_class` tag: 2 is a trading card, 3 a profile background, 4 an emoticon, 5 a booster pack and 7 Steam Gems.
 - Foil cards also have the tag `cardborder_1`. The game is the `Game` tag (`app_{appid}`), or `market_fee_app`.
@@ -63,6 +64,8 @@ Each definition has these fields:
 - `community_item_data`, with `item_name`, `item_title`, `item_image_large`, `item_image_small` and `animated`
 
 `active` and the availability timestamps are the starting point for the Limited and Unobtainable tags.
+
+There's no field saying an item can't be bought on its own. The app asks for each batch of games twice, with and without `include_direct_purchase_disabled`; items only in the second answer are sale rewards or event items. A bundle lists the items inside it in `bundle_defids`, so items sold only in a bundle still count as for sale. Other fields include `type`, `quantity`, `usable_duration`, `bundle_discount` and `timestamp_free_until` (from the public SteamDatabase Protobufs, `LoyaltyRewardDefinition`).
 
 ### Badges
 

@@ -2,6 +2,27 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.5.0] - 2026-10-22
+
+### Added
+
+- **Completion.** Every game shows how much of its collection you have, and the overview shows your whole account: items complete, the average game, games started and complete, and card sets complete. Cards, foil cards, emoticons, backgrounds and every other Points Shop item count. Booster packs are listed but don't count.
+- Cards count by badge level and the copies you hold. Each badge level uses one copy of every card, so a level 3 badge covers three of the five copies each card needs, and spare copies cover the rest. A game's cards are complete at badge level 5 plus the foil badge.
+- **Game details.** Click a game in the Games tab to see every item, what you own, each item's tags and its price in points. The tab also has a sortable Complete column and a Complete filter.
+- **Tags:** Unowned, Family shared, Points, Unobtainable, Limited/Event, Not marketable and Unverified.
+- **Availability.** The app works out whether each item can still be had, from the Points Shop's dates, whether it's sold on its own or in a bundle, and Steam sale events. Items that can't be had any more are tagged Unobtainable and left out of the percentage. You can set any item's availability yourself in its game's details.
+- Items you own that Steam no longer lists anywhere show up in their game's list, tagged Unobtainable. Owned items without an item number are matched by name and tagged Unverified.
+- Setting: **Also need the cards in my inventory**, so a card set counts as complete only when you also hold one of each card.
+- Steam Family games count toward the account figure when the Steam Family setting is on.
+
+### Changed
+
+- The next scan reads every game's Points Shop again, to learn which items can be bought on their own.
+
+### Fixed
+
+- Settings → Version history says it couldn't load the list of versions, with a Try again button, instead of saying no versions have been published.
+
 ## [0.4.2] - 2026-10-22
 
 ### Fixed
