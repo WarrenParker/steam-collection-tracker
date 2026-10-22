@@ -47,6 +47,7 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ⬜ Currency setting, USD by default.
 - ⬜ Account value before market fees.
 - ⬜ Cost to complete, with dollars and points shown separately.
+- ⬜ Shared price file. The owner's app publishes the prices and price history it reads as one small file on GitHub each day, and every copy of the app downloads it first, so it only asks Steam for what the file doesn't cover.
 
 ## Phase 4: Interface
 

@@ -11,6 +11,10 @@ Ideas that aren't scheduled yet, and requests that have shipped. When an idea is
 - ⬜ **Monetization and advertising.** Ways to fund the app, with a mobile version as the main place for it: ads in a free mobile app, a paid or supporter version, or donations. Steam's Web API and branding terms need checking before any of this. *Added Oct 22, 2026.*
 - ⬜ **More devices and platforms.** Tauri can also build for macOS, Linux and iOS from the same code. The Steam Deck runs Linux, so a Linux build would work in its desktop mode, and a controller-friendly layout would make it work in Game Mode too. *Added Oct 22, 2026.*
 - ⬜ **SteamHunters and achievements.** Show achievement progress next to each game's collection, through SteamHunters or Steam's own achievement data. *Added Oct 22, 2026.*
+- ⬜ **Prices from everyone's apps.** Let every copy of the app add the prices it reads to the shared price file, so games outside the owner's library are covered too. This needs a small server that checks what it's sent before it's shared. *Added Oct 22, 2026.*
+- ⬜ **Order books only when a game is opened.** Read the order books behind the cost of several copies when you open a game, instead of during every scan. Scans get faster, and cost to complete stays an estimate until a game is opened. *Added Oct 22, 2026.*
+- ⬜ **Price history refresh setting.** Choose how often price histories are read again: monthly (about 1 GB of downloads a month for a large collection) or every three months (about a third of that). *Added Oct 22, 2026.*
+- ⬜ **Bulk price services.** Check whether paid Steam Market data services cover trading cards, emoticons and backgrounds, and what they cost, as another way to fill prices quickly. *Added Oct 22, 2026.*
 
 ## Shipped
 
