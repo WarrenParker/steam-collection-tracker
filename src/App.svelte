@@ -11,6 +11,7 @@
   } from './lib/api';
   import Setup from './lib/Setup.svelte';
   import Overview from './lib/Overview.svelte';
+  import Games from './lib/Games.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import UpdateBar from './lib/UpdateBar.svelte';
   import Icon from './lib/Icon.svelte';
@@ -20,6 +21,7 @@
   let update = $state<UpdateState | null>(null);
   let settingsOpen = $state(false);
   let settingsFocus = $state<'updates' | null>(null);
+  let view = $state<'overview' | 'games'>('overview');
   let fatal = $state('');
 
   const updateWaiting = $derived(!!update && (update.ready || update.available));
@@ -73,7 +75,17 @@
   {:else}
     <div class="shell">
       <header class="topbar">
-        <div class="brand"><span class="mark" aria-hidden="true"></span>Steam Collection Tracker</div>
+        <div class="topbar-left">
+          <div class="brand"><span class="mark" aria-hidden="true"></span>Steam Collection Tracker</div>
+          <nav class="tabs" aria-label="Views">
+            <button aria-current={view === 'overview' ? 'page' : undefined} onclick={() => (view = 'overview')}>
+              Overview
+            </button>
+            <button aria-current={view === 'games' ? 'page' : undefined} onclick={() => (view = 'games')}>
+              Games
+            </button>
+          </nav>
+        </div>
         <div class="topbar-right">
           {#if settings.profile}
             <div class="who">
@@ -105,11 +117,19 @@
         <UpdateBar {update} />
       {/if}
       <main class="content">
-        <Overview
-          signedIn={settings.signed_in}
-          onprofile={profileChanged}
-          onsettings={(s) => (settings = s)}
-        />
+        <div class:hidden={view !== 'overview'}>
+          <Overview
+            signedIn={settings.signed_in}
+            includeFamily={settings.include_family}
+            onprofile={profileChanged}
+            onsettings={(s) => (settings = s)}
+          />
+        </div>
+        {#if view === 'games'}
+          {#key settings.include_family}
+            <Games steamId={settings.profile?.steam_id ?? null} />
+          {/key}
+        {/if}
       </main>
     </div>
   {/if}

@@ -41,10 +41,6 @@ impl AppPaths {
         self.root.join("settings.json")
     }
 
-    pub fn cache_dir(&self) -> PathBuf {
-        self.sub("cache")
-    }
-
     pub fn reports_dir(&self) -> PathBuf {
         self.sub("reports")
     }

@@ -9,15 +9,19 @@ What the app reads from Steam, where it comes from, and what each connection tes
 | Profile | `ISteamUser/GetPlayerSummaries/v2` | API key | Works. `communityvisibilitystate` 3 means public. (0.1.0) |
 | Owned games | `IPlayerService/GetOwnedGames/v1` | API key; Game details public | Works. A private library answers with an empty `response`. (0.1.0) |
 | Badges and level | `IPlayerService/GetBadges/v1` | API key | Works. Game badges have an `appid`; foil badges have `border_color: 1`. (0.1.0) |
-| Card set and owned cards | `steamcommunity.com/profiles/{id}/gamecards/{appid}` (HTML) | Nothing | Works without sign-in. Cards are `class="badge_card_set_card …"`; owned quantities are in `badge_card_set_text_qty`. (0.1.0) |
+| Item definitions per game | `IQuestService/GetCommunityItemDefinitions/v1?appid={appid}` | Unknown; tried without a key, then with the key, then with the sign-in token | Not tested yet. Lists every community item of a game with its class, type number, names and images, including framed and foil card art (`item_image_composed`, `item_image_composed_foil`). The fast route for the catalog. (0.3.0) |
+| Which games have trading cards | `IStoreBrowseService/GetItems/v1?input_json=…` with `include_basic_info` | Nothing, or the key if refused | Not tested yet. Store category 29 is Steam Trading Cards, in `categories.feature_categoryids`. Up to 100 games per request. (0.3.0) |
+| Card set and owned cards | `steamcommunity.com/profiles/{id}/gamecards/{appid}` (HTML) | Nothing | Works without sign-in. Cards are `class="badge_card_set_card …"`; owned quantities are in `badge_card_set_text_qty`. (0.1.0) The slow fallback route for the catalog from 0.3.0. |
 | Badges page | `steamcommunity.com/profiles/{id}/badges` (HTML) | Nothing | Works without sign-in. Rows are `class="badge_row …"`, with card drops remaining in `badge_title_stats_drops`. (0.1.0) |
 | Inventory | `steamcommunity.com/inventory/{id}/753/6` | Sign-in | **Refused without sign-in** (429 on the first request). (0.1.0) |
 | Inventory, signed in | `IEconService/GetInventoryItemsWithDescriptions/v1` with the sign-in Web API token | Sign-in | **Works** and is fast (under 0.2 s). Same `assets`/`descriptions` layout as the community inventory, inside `response`. Includes Points Shop items such as animated avatars, frames and stickers. (0.2.0) |
 | Market items per game | `steamcommunity.com/market/search/render?norender=1&category_753_Game[]=tag_app_{appid}` | Unknown | **Refused** with 429 on the first request, both without sign-in (0.1.0) and signed in (0.2.0). This is likely a block on the connection left over from 0.1.0, which retried market requests. Re-test after several hours before deciding. |
 | Price history | `steamcommunity.com/market/pricehistory` (signed in), or the `var line1` graph data in an item's market page | Sign-in | Not tested yet: the test needs an item from the market search. |
-| Points Shop catalog | `ILoyaltyRewardsService/QueryRewardItems/v1?appids[0]={appid}` | Nothing | Works without a key: 29 items for Counter-Strike 2. (0.1.0) |
+| Points Shop catalog | `ILoyaltyRewardsService/QueryRewardItems/v1?appids[0]={appid}` | Nothing | Works without a key: 29 items for Counter-Strike 2. (0.1.0) From 0.3.0 the app asks about 20 games per request (`appids[0]` to `appids[19]`), 100 items per page, following `next_cursor`. Not tested yet with several games. |
+| Games with a Points Shop page | `ILoyaltyRewardsService/GetEligibleApps/v1` | Nothing | Not tested yet. Each app has `event_app`, which marks Steam sale events. (0.3.0) |
+| Emoticons owned | `IPlayerService/GetEmoticonList/v1` | Sign-in token | Not tested yet. Each emoticon has `name`, `count` and `appid`. (0.3.0) |
 | Points Shop items owned | `IPlayerService/GetProfileItemsOwned/v1` | Sign-in token | **Works** signed in. The answer groups items into `animated_avatars`, `avatar_frames`, `mini_profile_backgrounds`, `profile_backgrounds` and so on. 401 with only an API key. (0.2.0) |
-| Steam Family library | `IFamilyGroupsService/GetFamilyGroupForUser`, then `GetSharedLibraryApps` | Sign-in token | **Works** signed in. The first returns `family_groupid` (or `is_not_member_of_any_group`); the second lists shared `apps` with their owners. 401 with only an API key. (0.2.0) |
+| Steam Family library | `IFamilyGroupsService/GetFamilyGroupForUser`, then `GetSharedLibraryApps` | Sign-in token | **Works** signed in: 193 shared games on the owner's account. The first returns `family_groupid` (or `is_not_member_of_any_group`); the second lists shared `apps` with their owners. 401 with only an API key. (0.2.0) |
 | Sign-in token | `store.steampowered.com/pointssummary/ajaxgetasyncconfig` (`data.webapi_token`) | Sign-in cookie | **Works.** Steam sets the store cookie during sign-in, and the sign-in lasts about 24 hours before the app renews it. (0.2.0) |
 
 ## Rate limits
@@ -31,10 +35,22 @@ What the app reads from Steam, where it comes from, and what each connection tes
 
 ### Inventory (app 753, context 6)
 
+- Signed in, an item's `owner_actions` include "Turn into Gems" as `javascript:GetGooValue( '%contextid%', '%assetid%', {appid}, {item_type}, {border} )`. That gives the item's type number, which matches the item definitions. Not confirmed on a real inventory yet.
+
 - `assets` and `descriptions` are joined on `classid` and `instanceid`. `amount` is a string, and gems come as one stack.
 - An item's type is its `item_class` tag: 2 is a trading card, 3 a profile background, 4 an emoticon, 5 a booster pack and 7 Steam Gems.
 - Foil cards also have the tag `cardborder_1`. The game is the `Game` tag (`app_{appid}`), or `market_fee_app`.
 - Pages hold up to 2,000 items. When `more_items` is 1, pass `last_assetid` as `start_assetid` to get the next page.
+
+### Item definitions (`IQuestService/GetCommunityItemDefinitions`)
+
+Each definition has `appid`, `item_class`, `item_type`, `item_name`, `item_title`, `item_description`, `item_image_small`, `item_image_large`, `item_series`, `active` and `deleted`, and for cards `item_image_composed` and `item_image_composed_foil`. Images can be file names inside `https://cdn.akamai.steamstatic.com/steamcommunity/public/images/items/{appid}/`. Item classes match the inventory's `item_class_N` tags: 1 badge, 2 card, 3 background, 4 emoticon, 5 booster, 11 sticker, 13 mini profile background, 14 avatar frame, 15 animated avatar.
+
+Booster packs aren't community item definitions, so the app adds one per game with cards.
+
+### Points Shop and trading card items
+
+The Points Shop sells each game's trading-card emoticons and static backgrounds as well as its own items. Steam's partner documentation says buyers must own the game and have played it for at least two hours. Items bought with points can't be traded or sold on the market.
 
 ### Points Shop definitions
 

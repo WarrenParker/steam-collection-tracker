@@ -26,6 +26,26 @@ export function duration(ms: number): string {
   return rest ? `${plural(minutes, 'minute')} ${plural(rest, 'second')}` : plural(minutes, 'minute');
 }
 
+/** "about 3 minutes", for time estimates. */
+export function roughly(seconds: number): string {
+  if (seconds < 60) return 'under a minute';
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `about ${plural(minutes, 'minute')}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest
+    ? `about ${plural(hours, 'hour')} ${plural(rest, 'minute')}`
+    : `about ${plural(hours, 'hour')}`;
+}
+
+/** "3:45 PM" for a Unix time. */
+export function clock(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function date(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);

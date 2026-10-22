@@ -81,6 +81,14 @@
     }
   }
 
+  async function toggleFamily() {
+    try {
+      onchange(await api.updatePreferences({ include_family: !settings.include_family }));
+    } catch (e) {
+      error = errorText(e);
+    }
+  }
+
   async function saveKey(e: SubmitEvent) {
     e.preventDefault();
     busy = true;
@@ -259,6 +267,27 @@
 
       {#if error}<p class="field-error" role="alert">{error}</p>{/if}
       {#if saved}<p class="desc good">{saved}</p>{/if}
+    </section>
+
+    <section class="setting-group">
+      <h3>Collection</h3>
+      <div class="setting-row">
+        <div>
+          <div>Include Steam Family games</div>
+          <div class="desc">
+            {settings.signed_in
+              ? 'Lists games other members of your Steam Family share with you. Scan again to read their items.'
+              : 'Lists games your Steam Family shares with you. Needs Steam sign-in.'}
+          </div>
+        </div>
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={settings.include_family}
+          aria-label="Include Steam Family games"
+          onclick={toggleFamily}
+        ></button>
+      </div>
     </section>
 
     <section class="setting-group" bind:this={updatesSection}>

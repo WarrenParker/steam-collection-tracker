@@ -71,7 +71,7 @@
     <div>
       <h2>Test the Steam connection</h2>
       <p>
-        Checks each Steam source the app uses and saves a report. It sends about a dozen requests,
+        Checks each Steam source the app uses and saves a report. It sends about twenty requests,
         spaced out to stay well within Steam's limits, and takes under a minute. Attach the report
         when you report a problem.
       </p>

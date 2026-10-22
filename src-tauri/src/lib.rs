@@ -1,7 +1,10 @@
+mod catalog;
 mod commands;
+mod db;
 mod diagnostics;
 mod hexutil;
 mod housekeeping;
+mod jsonutil;
 mod paths;
 mod profile_input;
 mod scan;
@@ -22,6 +25,7 @@ pub fn run() {
     let theme = settings.theme;
     housekeeping::tidy_up(&paths);
     let app_state = state::AppState::new(paths.clone(), settings);
+    scan::import_legacy_summary(&paths, &app_state);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -33,8 +37,11 @@ pub fn run() {
             commands::update_preferences,
             commands::save_api_key,
             commands::set_profile,
-            commands::run_scan,
+            commands::start_scan,
+            commands::pause_scan,
+            commands::get_scan_status,
             commands::get_last_scan,
+            commands::get_games,
             commands::get_diagnostics_plan,
             commands::run_diagnostics,
             commands::read_report,

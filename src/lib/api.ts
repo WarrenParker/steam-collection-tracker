@@ -19,6 +19,7 @@ export interface SettingsView {
   has_api_key: boolean;
   api_key_hint: string | null;
   signed_in: boolean;
+  include_family: boolean;
 }
 
 export interface AppInfo {
@@ -62,12 +63,59 @@ export interface ScanSummary {
   warnings: string[];
   needs_sign_in: boolean;
   inventory_route: string | null;
+  family_games: number | null;
+  catalog: CatalogCounts | null;
 }
 
-export interface ScanProgress {
-  step: number;
+export interface KindCount {
+  label: string;
+  count: number;
+}
+
+export interface CatalogCounts {
+  games_listed: number;
+  games_owned: number;
+  games_unowned: number;
+  games_family: number;
+  games_with_cards: number;
+  games_cataloged: number;
+  items: number;
+  points_items: number;
+  by_kind: KindCount[];
+}
+
+export type ScanState = 'idle' | 'running' | 'paused' | 'waiting' | 'done' | 'failed';
+
+export interface ScanStatus {
+  state: ScanState;
+  stage: number;
+  label: string;
+  done: number;
   total: number;
-  message: string;
+  seconds_left: number | null;
+  remaining: number;
+  remaining_seconds: number | null;
+  slow_route: boolean;
+  resume_at: number | null;
+  message: string | null;
+  pause_requested: boolean;
+}
+
+export interface GameRow {
+  appid: number;
+  name: string;
+  owned: boolean;
+  family: boolean;
+  event: boolean;
+  has_cards: boolean | null;
+  cataloged: boolean;
+  cards: number;
+  items: number;
+  points_items: number;
+  your_items: number;
+  badge_level: number | null;
+  foil_badge: boolean;
+  playtime_minutes: number;
 }
 
 export type StepStatus = 'pending' | 'running' | 'ok' | 'warn' | 'fail' | 'skipped';
@@ -123,12 +171,15 @@ export const api = {
   appReady: () => invoke<void>('app_ready'),
   appInfo: () => invoke<AppInfo>('get_app_info'),
   settings: () => invoke<SettingsView>('get_settings'),
-  updatePreferences: (patch: { theme?: Theme; auto_update?: boolean }) =>
+  updatePreferences: (patch: { theme?: Theme; auto_update?: boolean; include_family?: boolean }) =>
     invoke<SettingsView>('update_preferences', { patch }),
   saveApiKey: (key: string) => invoke<SettingsView>('save_api_key', { key }),
   setProfile: (input: string) => invoke<ProfileCheck>('set_profile', { input }),
-  runScan: () => invoke<ScanSummary>('run_scan'),
+  startScan: (resume = false) => invoke<ScanStatus>('start_scan', { resume }),
+  pauseScan: () => invoke<ScanStatus>('pause_scan'),
+  scanStatus: () => invoke<ScanStatus>('get_scan_status'),
   lastScan: () => invoke<ScanSummary | null>('get_last_scan'),
+  games: () => invoke<GameRow[]>('get_games'),
   diagnosticsPlan: () => invoke<DiagStep[]>('get_diagnostics_plan'),
   runDiagnostics: () => invoke<DiagnosticsResult>('run_diagnostics'),
   readReport: (path: string) => invoke<string>('read_report', { path }),
@@ -156,4 +207,7 @@ export function errorText(e: unknown): string {
 export const links = {
   apiKey: 'https://steamcommunity.com/dev/apikey',
   privacy: 'https://steamcommunity.com/my/edit/settings',
+  store: (appid: number) => `https://store.steampowered.com/app/${appid}/`,
+  cards: (steamId: string, appid: number) =>
+    `https://steamcommunity.com/profiles/${steamId}/gamecards/${appid}/`,
 };
