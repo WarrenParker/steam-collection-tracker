@@ -4,6 +4,14 @@ A small Windows app that shows how complete your Steam item collection is: tradi
 
 It's in early development: it counts your games, badges and inventory items, signs in to Steam, and tests the Steam connection. Completion percentages, full item lists and prices come next. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
+## Documentation
+
+- [Changelog](CHANGELOG.md): what changed in each version
+- [Roadmap](docs/ROADMAP.md): the plan and where things stand
+- [Idea board](docs/IDEAS.md): ideas on the back burner, and requests that shipped
+- [Architecture](docs/ARCHITECTURE.md): how the app is built, stored and released
+- [Steam data sources](docs/STEAM-DATA.md): what each Steam source needs, and what tests showed
+
 ## Get it
 
 1. Open the [latest release](../../releases/latest) and download `SteamCollectionTracker.exe`.
