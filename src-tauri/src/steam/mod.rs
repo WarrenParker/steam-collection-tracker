@@ -21,6 +21,9 @@ pub const WEBAPI: &str = "https://api.steampowered.com";
 pub const COMMUNITY: &str = "https://steamcommunity.com";
 pub const STORE: &str = "https://store.steampowered.com";
 
+/// Used for Steam's web pages until the interface reports WebView2's own identity.
+const FALLBACK_BROWSER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+
 /// How long the app leaves a kind of request alone after Steam refuses it.
 pub const BLOCK_MINUTES: u64 = 30;
 
@@ -143,6 +146,7 @@ pub struct SteamClient {
     /// (kind of request, signed in) -> refused until.
     blocked: std::sync::Mutex<HashMap<(Bucket, bool), Instant>>,
     requests: AtomicU32,
+    browser_agent: std::sync::Mutex<Option<String>>,
 }
 
 impl SteamClient {
@@ -162,6 +166,7 @@ impl SteamClient {
             last: Mutex::new(HashMap::new()),
             blocked: std::sync::Mutex::new(HashMap::new()),
             requests: AtomicU32::new(0),
+            browser_agent: std::sync::Mutex::new(None),
         }
     }
 
@@ -212,6 +217,47 @@ impl SteamClient {
         cookie: Option<&str>,
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
+        self.send(bucket, url, None, cookie, notify).await
+    }
+
+    /// Sends a paced POST with a form body. Some Web API methods only accept POST.
+    pub async fn post_form(
+        &self,
+        bucket: Bucket,
+        url: &Url,
+        form: &[(&str, &str)],
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
+        self.send(bucket, url, Some(form), None, notify).await
+    }
+
+    /// The browser identity used for Steam's web pages and Market, which turn
+    /// away requests that don't look like they come from a browser. The app
+    /// embeds a browser (WebView2), and the interface reports its real identity
+    /// at startup; this is the fallback until it does.
+    pub fn set_browser_agent(&self, agent: &str) {
+        let agent = agent.trim();
+        if agent.starts_with("Mozilla/") && agent.len() < 400 {
+            *self.browser_agent.lock().unwrap_or_else(|e| e.into_inner()) = Some(agent.to_string());
+        }
+    }
+
+    fn browser_agent(&self) -> String {
+        self.browser_agent
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| FALLBACK_BROWSER_AGENT.to_string())
+    }
+
+    async fn send(
+        &self,
+        bucket: Bucket,
+        url: &Url,
+        form: Option<&[(&str, &str)]>,
+        cookie: Option<&str>,
+        notify: Notify<'_>,
+    ) -> Result<Fetched, String> {
         let signed_in = cookie.is_some();
         if bucket != Bucket::WebApi && self.is_blocked(bucket, signed_in) {
             return Ok(Fetched {
@@ -232,7 +278,11 @@ impl SteamClient {
             self.pace(bucket).await;
             self.requests.fetch_add(1, Ordering::Relaxed);
             let started = Instant::now();
-            let mut request = self.http.get(url.clone());
+            let mut request = match form {
+                Some(fields) => self.http.post(url.clone()).form(fields),
+                None => self.http.get(url.clone()),
+            };
+            request = self.browser_headers(bucket, request);
             if let Some(c) = cookie {
                 request = request.header(reqwest::header::COOKIE, c);
             }
@@ -272,6 +322,34 @@ impl SteamClient {
                     });
                 }
             }
+        }
+    }
+
+    /// Steam's web pages and Market get the headers a browser would send.
+    fn browser_headers(
+        &self,
+        bucket: Bucket,
+        request: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, REFERER, USER_AGENT};
+        match bucket {
+            Bucket::WebApi => request,
+            Bucket::Market => request
+                .header(USER_AGENT, self.browser_agent())
+                .header(ACCEPT, "application/json, text/javascript, */*; q=0.01")
+                .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+                .header(
+                    REFERER,
+                    "https://steamcommunity.com/market/search?appid=753",
+                )
+                .header("X-Requested-With", "XMLHttpRequest"),
+            Bucket::Community | Bucket::Inventory | Bucket::Store => request
+                .header(USER_AGENT, self.browser_agent())
+                .header(
+                    ACCEPT,
+                    "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+                )
+                .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9"),
         }
     }
 
@@ -412,25 +490,6 @@ impl SteamClient {
 }
 
 impl SteamClient {
-    /// Every community item a game has: cards with their foil art, emoticons,
-    /// backgrounds, badges and Points Shop items.
-    pub async fn item_definitions(
-        &self,
-        appid: u64,
-        auth: Auth<'_>,
-        notify: Notify<'_>,
-    ) -> Result<Fetched, String> {
-        let app = appid.to_string();
-        let mut params = vec![("appid", app.as_str()), ("language", "english")];
-        match auth {
-            Auth::None => {}
-            Auth::Key(k) => params.push(("key", k)),
-            Auth::Token(t) => params.push(("access_token", t)),
-        }
-        let url = webapi_url("/IQuestService/GetCommunityItemDefinitions/v1/", &params);
-        self.fetch(Bucket::WebApi, &url, None, notify).await
-    }
-
     /// Store details for a batch of games, including whether each has trading cards.
     pub async fn store_items(
         &self,
@@ -480,15 +539,6 @@ impl SteamClient {
     /// Every game with a Points Shop page, flagging Steam sale events.
     pub async fn eligible_apps(&self, notify: Notify<'_>) -> Result<Fetched, String> {
         let url = webapi_url("/ILoyaltyRewardsService/GetEligibleApps/v1/", &[]);
-        self.fetch(Bucket::WebApi, &url, None, notify).await
-    }
-
-    /// Every emoticon the signed-in user can use.
-    pub async fn emoticons(&self, token: &str, notify: Notify<'_>) -> Result<Fetched, String> {
-        let url = webapi_url(
-            "/IPlayerService/GetEmoticonList/v1/",
-            &[("access_token", token)],
-        );
         self.fetch(Bucket::WebApi, &url, None, notify).await
     }
 
@@ -546,7 +596,8 @@ impl SteamClient {
         self.fetch(Bucket::WebApi, &url, None, notify).await
     }
 
-    /// Achievement progress (unlocked and total) for a batch of games.
+    /// Achievement progress (unlocked and total) for a batch of games. This
+    /// method only accepts POST.
     pub async fn achievements_progress(
         &self,
         auth: Auth<'_>,
@@ -559,15 +610,15 @@ impl SteamClient {
             .enumerate()
             .map(|(i, a)| (format!("appids[{i}]"), a.to_string()))
             .collect();
-        let mut params: Vec<(&str, &str)> = vec![("steamid", steam_id), ("language", "english")];
+        let mut form: Vec<(&str, &str)> = vec![("steamid", steam_id), ("language", "english")];
         match auth {
             Auth::None => {}
-            Auth::Key(k) => params.push(("key", k)),
-            Auth::Token(t) => params.push(("access_token", t)),
+            Auth::Key(k) => form.push(("key", k)),
+            Auth::Token(t) => form.push(("access_token", t)),
         }
-        params.extend(ids.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-        let url = webapi_url("/IPlayerService/GetAchievementsProgress/v1/", &params);
-        self.fetch(Bucket::WebApi, &url, None, notify).await
+        form.extend(ids.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        let url = webapi_url("/IPlayerService/GetAchievementsProgress/v1/", &[]);
+        self.post_form(Bucket::WebApi, &url, &form, notify).await
     }
 
     /// A game's card page, read without sign-in.

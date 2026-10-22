@@ -50,6 +50,12 @@ pub fn app_ready(window: WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// The interface reports WebView2's browser identity, used for Steam's web pages.
+#[tauri::command]
+pub fn report_browser_agent(state: State<'_, AppState>, agent: String) {
+    state.steam.set_browser_agent(&agent);
+}
+
 #[tauri::command]
 pub async fn get_app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
     Ok(AppInfo {

@@ -1,13 +1,12 @@
 //! The collection scan. It runs in the background in four stages:
 //!
 //! 1. **Library:** profile, owned games, Steam Family library, badges,
-//!    inventory, emoticons and profile items. A handful of requests.
+//!    inventory, achievements and profile items. A handful of requests.
 //! 2. **Store check:** which games have trading cards, and names for games the
 //!    user doesn't own. Web API, 100 games per request.
 //! 3. **Points Shop:** every item each game sells for points. Web API, batched.
-//! 4. **Item catalog:** each card game's full item list, from Steam's item
-//!    definitions (Web API, fast) or, when those aren't available, the game's
-//!    card page (Community, slow).
+//! 4. **Item catalog:** each card game's card set, from the game's card page
+//!    (Community pages, paced at one every 3.5 seconds).
 //!
 //! Everything is saved as it arrives, so a scan can be paused, or the app
 //! closed, and picked up later. Rescans only fetch what's missing or out of
@@ -23,13 +22,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::catalog::{cardpage, class, defs, library, points, store, CatalogItem};
+use crate::catalog::{cardpage, library, points, store};
 use crate::db::{self, CatalogCounts, CatalogTarget, LibraryUpdate};
 use crate::paths::AppPaths;
 use crate::session::{self, Session};
 use crate::state::AppState;
 use crate::steam::{
-    inventory, parse_achievements, Auth, Bucket, Fetched, Notify, ProfileView, BLOCK_MINUTES,
+    inventory, parse_achievements, Auth, Bucket, Notify, ProfileView, BLOCK_MINUTES,
 };
 
 pub const PRIVATE_PROFILE: &str = "Your Steam profile is private, so the app can't see your games, badges or inventory. In Steam's privacy settings, set My profile, Game details and Inventory to Public.";
@@ -47,23 +46,15 @@ const CATALOG_STALE_DAYS: i64 = 30;
 const LIBRARY_FRESH_HOURS: i64 = 6;
 /// A first catalog expected to take longer than this waits for a go-ahead.
 const CONFIRM_SECONDS: f64 = 10.0 * 60.0;
-/// Typical time per game for each route, until real timings take over.
-const FAST_SECONDS: f64 = 0.5;
-const SLOW_SECONDS: f64 = 4.2;
-/// After this many games where the item definitions came back without cards
-/// for a game that has them, the scan switches to card pages.
-const EMPTY_DEFS_LIMIT: u32 = 5;
+/// Typical time per game, until real timings take over.
+const SECONDS_PER_GAME: f64 = 4.2;
 const MAX_POINTS_PAGES: usize = 40;
 /// Games per achievement progress request.
 const ACH_PER_REQUEST: usize = 100;
-/// Games in a row that Steam refused to list before the scan takes a break.
-const LIMITED_IN_A_ROW: u32 = 3;
 const MAX_INVENTORY_PAGES: u32 = 200;
 
 const META_LIBRARY_READ: &str = "library_read_at";
 const META_ELIGIBLE_READ: &str = "eligible_apps_read_at";
-const META_ROUTE: &str = "catalog_route";
-const META_ROUTE_AT: &str = "catalog_route_set_at";
 
 // ---- The overview summary ---------------------------------------------------
 
@@ -136,8 +127,6 @@ pub struct ScanStatus {
     pub remaining: u64,
     /// Rough time to read those.
     pub remaining_seconds: Option<u64>,
-    /// The catalog is coming from card pages, the slow route.
-    pub slow_route: bool,
     /// When a held-back scan carries on by itself (Unix seconds).
     pub resume_at: Option<i64>,
     /// How the last run ended, or why it stopped.
@@ -192,11 +181,10 @@ impl ScanControl {
 pub fn status(app: &AppHandle) -> ScanStatus {
     let state = app.state::<AppState>();
     if !state.scan.is_running() {
-        let (remaining, seconds, slow) = backlog(&state);
+        let (remaining, seconds) = backlog(&state);
         let mut s = state.scan.status.lock().unwrap_or_else(|e| e.into_inner());
         s.remaining = remaining;
         s.remaining_seconds = seconds;
-        s.slow_route = slow;
         if s.message.is_none() {
             if let Some(problem) = &state.db_problem {
                 s.message = Some(format!(
@@ -223,7 +211,6 @@ pub fn start(app: &AppHandle, resume: bool) -> ScanStatus {
             label: "Starting…".to_string(),
             remaining: s.remaining,
             remaining_seconds: s.remaining_seconds,
-            slow_route: s.slow_route,
             ..ScanStatus::default()
         };
     });
@@ -268,7 +255,7 @@ enum RunEnd {
 
 fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
     let state = app.state::<AppState>();
-    let (remaining, remaining_seconds, slow) = backlog(&state);
+    let (remaining, remaining_seconds) = backlog(&state);
     let (next, message, resume_at) = match outcome {
         Ok(RunEnd::Done { seconds }) => (
             ScanState::Done,
@@ -283,13 +270,8 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
         Ok(RunEnd::NeedsConfirm) => (
             ScanState::Paused,
             Some(format!(
-                "Your library is read. Cataloging every game's items takes about {}{}. You can keep using the app while it runs, and pause it anytime.",
-                duration_text(remaining_seconds.unwrap_or(0)),
-                if slow {
-                    " because Steam's quick item list isn't available on your connection"
-                } else {
-                    ""
-                }
+                "Your library is read. Cataloging every game's items takes about {}. You can keep using the app while it runs, and pause it anytime.",
+                duration_text(remaining_seconds.unwrap_or(0))
             )),
             None,
         ),
@@ -312,7 +294,6 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
         s.pause_requested = false;
         s.remaining = remaining;
         s.remaining_seconds = remaining_seconds;
-        s.slow_route = slow;
         s.message = message;
         s.resume_at = resume_at;
     });
@@ -332,33 +313,19 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
     }
 }
 
-/// Games still waiting for their catalog, a time estimate, and whether the
-/// slow route is in use.
-fn backlog(state: &AppState) -> (u64, Option<u64>, bool) {
+/// Games still waiting for their catalog, and a time estimate.
+fn backlog(state: &AppState) -> (u64, Option<u64>) {
     let family = state.settings().include_family;
-    let route = state
-        .db
-        .read(|c| db::get_meta(c, META_ROUTE))
-        .ok()
-        .flatten();
-    let slow = route.as_deref() == Some(Route::CARD_PAGES);
     let targets = state
         .db
-        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY, false))
+        .read(|c| db::catalog_targets(c, family, db::now() - CATALOG_STALE_DAYS * DAY))
         .unwrap_or_default();
-    let remaining = targets.iter().filter(|t| t.wanted(!slow)).count() as u64;
-    let per_game = if slow { SLOW_SECONDS } else { FAST_SECONDS };
-    let seconds = (remaining > 0).then(|| (remaining as f64 * per_game).ceil() as u64);
-    (remaining, seconds, slow)
+    let remaining = targets.iter().filter(|t| t.wanted()).count() as u64;
+    let seconds = (remaining > 0).then(|| (remaining as f64 * SECONDS_PER_GAME).ceil() as u64);
+    (remaining, seconds)
 }
 
 // ---- The run itself -----------------------------------------------------------
-
-struct Route;
-
-impl Route {
-    const CARD_PAGES: &'static str = "card_page";
-}
 
 struct Ctx<'a> {
     app: &'a AppHandle,
@@ -457,7 +424,7 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
         summary = Some(s);
     }
 
-    let outcome = catalog_stages(&ctx, &key, &steam_id, token.as_deref(), family_on, resume).await;
+    let outcome = catalog_stages(&ctx, &key, &steam_id, family_on, resume).await;
 
     // Whatever happened, keep the overview's catalog figures current.
     let status = match &outcome {
@@ -522,11 +489,10 @@ async fn read_library(
     let outcome = read_inventory(state, steam_id, session, notify, &on_page).await?;
     warnings.extend(outcome.warning.clone());
     if session.is_some() && token.is_none() {
-        warnings.push("Your Steam sign-in didn't include a Web API token, so Steam Family games, emoticons and profile items were skipped. Sign out and in again from Settings.".to_string());
+        warnings.push("Your Steam sign-in didn't include a Web API token, so Steam Family games and profile items were skipped. Sign out and in again from Settings.".to_string());
     }
 
     let mut family: Option<Vec<library::FamilyApp>> = None;
-    let mut emoticons: Option<Vec<library::OwnedProfileItem>> = None;
     let mut profile_items: Option<Vec<library::OwnedProfileItem>> = None;
     if let Some(token) = token {
         ctx.label("Reading your Steam Family library…");
@@ -543,9 +509,7 @@ async fn read_library(
             None => {}
         }
 
-        ctx.label("Reading your emoticons and profile items…");
-        let e = state.steam.emoticons(token, notify).await?;
-        emoticons = e.json().as_ref().and_then(library::parse_emoticons);
+        ctx.label("Reading your profile items…");
         let p = state
             .steam
             .profile_items_owned(token, steam_id, notify)
@@ -582,9 +546,6 @@ async fn read_library(
         }
         if badges.visible {
             db::replace_badges(tx, &badges.list)?;
-        }
-        if let Some(e) = &emoticons {
-            db::replace_profile_items(tx, "emoticons", e)?;
         }
         if let Some(p) = &profile_items {
             db::replace_profile_items(tx, "profile_items", p)?;
@@ -682,7 +643,6 @@ async fn catalog_stages(
     ctx: &Ctx<'_>,
     key: &str,
     steam_id: &str,
-    token: Option<&str>,
     family_on: bool,
     resume: bool,
 ) -> Result<RunEnd, String> {
@@ -768,128 +728,47 @@ async fn catalog_stages(
         ctx.progress(done, None);
     }
 
-    // Stage 4: each game's item catalog.
-    // Card pages are the fallback. A day after falling back, the next scan
-    // tries Steam's item list again, since the reason may have gone away.
-    let route_set_at = data
-        .read(|c| db::get_meta(c, META_ROUTE_AT))?
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-    let mut slow = data.read(|c| db::get_meta(c, META_ROUTE))?.as_deref()
-        == Some(Route::CARD_PAGES)
-        && db::now() - route_set_at < DAY;
+    // Stage 4: each card game's card set, from its card page.
     let targets: Vec<CatalogTarget> = data
-        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY, !slow))?
+        .read(|c| db::catalog_targets(c, family_on, db::now() - CATALOG_STALE_DAYS * DAY))?
         .into_iter()
-        .filter(|t| t.wanted(!slow))
+        .filter(|t| t.wanted())
         .collect();
     let first_catalog = data
         .read(|c| db::catalog_counts(c, family_on))?
         .games_cataloged
         == 0;
-    let estimate =
-        |left: usize, slow: bool| left as f64 * if slow { SLOW_SECONDS } else { FAST_SECONDS };
-    if !resume && first_catalog && estimate(targets.len(), slow) > CONFIRM_SECONDS {
+    if !resume && first_catalog && targets.len() as f64 * SECONDS_PER_GAME > CONFIRM_SECONDS {
         return Ok(RunEnd::NeedsConfirm);
     }
 
     ctx.stage(4, "Cataloging every game's items…", targets.len() as u64);
-    ctx.state.scan.set(ctx.app, |s| s.slow_route = slow);
-    let mut auths: Vec<Auth> = vec![Auth::None, Auth::Key(key)];
-    if let Some(t) = token {
-        auths.push(Auth::Token(t));
-    }
-    let mut auth_index = 0usize;
-    let mut empty_defs = 0u32;
-    let mut limited = 0u32;
     let mut timed = 0u32;
     let mut timed_secs = 0f64;
-
     for (i, target) in targets.iter().enumerate() {
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
         }
-        if slow && target.upgrade_only {
-            // Only worth reading through Steam's item list, which isn't working.
-            ctx.progress(i as u64 + 1, None);
-            continue;
-        }
         let game_started = Instant::now();
-        let has_cards = target.has_cards == Some(true) || target.evidence;
-        let mut found: Option<(Vec<CatalogItem>, &str)> = None;
-        let mut extra: Vec<CatalogItem> = Vec::new();
-
-        if !slow {
-            match read_defs(state, target.appid, &auths, &mut auth_index, notify).await? {
-                DefsResult::Items(items) => {
-                    limited = 0;
-                    if defs::card_count(&items) > 0 || !has_cards {
-                        empty_defs = 0;
-                        found = Some((items, "defs"));
-                    } else {
-                        // The definitions left out the cards this game has.
-                        empty_defs += 1;
-                        extra = items;
-                    }
-                }
-                DefsResult::Limited => {
-                    limited += 1;
-                    if limited >= LIMITED_IN_A_ROW {
-                        return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
-                    }
-                    ctx.progress(i as u64 + 1, None);
-                    continue;
-                }
-                DefsResult::Skip(error) => {
-                    data.write(|tx| db::save_catalog_error(tx, target.appid, &error))?;
-                    ctx.progress(i as u64 + 1, None);
-                    continue;
-                }
-                DefsResult::Unavailable => {
-                    empty_defs = EMPTY_DEFS_LIMIT;
-                }
-            }
-            if empty_defs >= EMPTY_DEFS_LIMIT {
-                slow = true;
-                data.write(|tx| {
-                    db::set_meta(tx, META_ROUTE, Route::CARD_PAGES)?;
-                    db::set_meta(tx, META_ROUTE_AT, &db::now().to_string())
-                })?;
-                ctx.state.scan.set(ctx.app, |s| s.slow_route = true);
-                let left = targets.len() - i;
-                if !resume && first_catalog && estimate(left, true) > CONFIRM_SECONDS {
-                    return Ok(RunEnd::NeedsConfirm);
-                }
-            }
+        if state.steam.is_blocked(Bucket::Community, false) {
+            return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
         }
-
-        if found.is_none() && has_cards {
-            if state.steam.is_blocked(Bucket::Community, false) {
-                return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
-            }
-            let f = state
-                .steam
-                .card_page(steam_id, target.appid, notify)
-                .await?;
-            if f.status == 429 {
-                return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
-            }
-            if !f.is_success() {
-                let error = format!("The card page answered with code {}.", f.status);
-                data.write(|tx| db::save_catalog_error(tx, target.appid, &error))?;
-                ctx.progress(i as u64 + 1, None);
-                continue;
-            }
+        let f = state
+            .steam
+            .card_page(steam_id, target.appid, notify)
+            .await?;
+        if f.status == 429 {
+            return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
+        }
+        if f.is_success() {
             let page = cardpage::parse(&f.body);
             let mut items = cardpage::to_items(&page);
             let known = data.read(|c| db::owned_card_types(c, target.appid))?;
             cardpage::apply_known_types(&mut items, &known);
-            items.extend(extra.drain(..).filter(|x| x.class != class::CARD));
-            found = Some((items, Route::CARD_PAGES));
-        }
-
-        if let Some((items, source)) = found {
-            data.write(|tx| db::save_catalog(tx, target.appid, &items, source))?;
+            data.write(|tx| db::save_catalog(tx, target.appid, &items, "card_page"))?;
+        } else {
+            let error = format!("The card page answered with code {}.", f.status);
+            data.write(|tx| db::save_catalog_error(tx, target.appid, &error))?;
         }
 
         timed += 1;
@@ -897,63 +776,13 @@ async fn catalog_stages(
         let left = (targets.len() - i - 1) as f64;
         let per_game = if timed >= 3 {
             timed_secs / f64::from(timed)
-        } else if slow {
-            SLOW_SECONDS
         } else {
-            FAST_SECONDS
+            SECONDS_PER_GAME
         };
         ctx.progress(i as u64 + 1, Some((left * per_game).ceil() as u64));
     }
 
     Ok(RunEnd::Done { seconds: 0 })
-}
-
-enum DefsResult {
-    Items(Vec<CatalogItem>),
-    /// Steam asked the app to slow down, even after the client's own waits.
-    Limited,
-    /// This game's answer was unusable; the next game may be fine.
-    Skip(String),
-    /// The item definitions can't be read on this connection at all.
-    Unavailable,
-}
-
-/// Reads one game's item definitions, trying each way of identifying the app
-/// until one is accepted. The one that works is kept for the following games.
-async fn read_defs(
-    state: &AppState,
-    appid: u64,
-    auths: &[Auth<'_>],
-    auth_index: &mut usize,
-    notify: Notify<'_>,
-) -> Result<DefsResult, String> {
-    while *auth_index < auths.len() {
-        let f: Fetched = state
-            .steam
-            .item_definitions(appid, auths[*auth_index], notify)
-            .await?;
-        if f.status == 401 || f.status == 403 {
-            *auth_index += 1;
-            continue;
-        }
-        if f.status == 429 {
-            return Ok(DefsResult::Limited);
-        }
-        if f.status >= 500 {
-            return Ok(DefsResult::Skip(format!(
-                "Steam's item list answered with code {}.",
-                f.status
-            )));
-        }
-        if !f.is_success() {
-            return Ok(DefsResult::Unavailable);
-        }
-        return Ok(match f.json().as_ref().and_then(defs::parse) {
-            Some(items) => DefsResult::Items(items),
-            None => DefsResult::Unavailable,
-        });
-    }
-    Ok(DefsResult::Unavailable)
 }
 
 fn save_summary(state: &AppState, scan_id: i64, summary: &ScanSummary) {

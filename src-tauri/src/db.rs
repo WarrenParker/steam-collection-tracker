@@ -502,45 +502,37 @@ pub struct CatalogTarget {
     pub has_cards: Option<bool>,
     /// The user has a badge or card-set items for the game, so it has cards.
     pub evidence: bool,
-    /// The catalog is up to date but came from the card page; it's only
-    /// worth reading again through Steam's item list.
-    pub upgrade_only: bool,
 }
 
 impl CatalogTarget {
-    /// Whether the game needs its catalog read. Games the store couldn't place
-    /// are only worth checking when requests are cheap.
-    pub fn wanted(&self, cheap: bool) -> bool {
-        self.has_cards == Some(true) || self.evidence || (self.has_cards.is_none() && cheap)
+    /// Whether the game needs its card page read: the store says it has cards,
+    /// or the user has cards, badges or card-set items for it.
+    pub fn wanted(&self) -> bool {
+        self.has_cards == Some(true) || self.evidence
     }
 }
 
-/// Listed games whose catalog is missing or older than `before`, plus, when
-/// `upgrade` is set, games whose catalog came from a card page.
+/// Listed games whose catalog is missing or older than `before`.
 pub fn catalog_targets(
     c: &Connection,
     family: bool,
     before: i64,
-    upgrade: bool,
 ) -> rusqlite::Result<Vec<CatalogTarget>> {
     let sql = format!(
         "SELECT a.appid, a.has_cards,
              EXISTS (SELECT 1 FROM badges b WHERE b.appid = a.appid)
-             OR EXISTS (SELECT 1 FROM inventory i WHERE i.appid = a.appid AND i.class IN (2, 3, 4, 5)),
-             NOT (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2)
+             OR EXISTS (SELECT 1 FROM inventory i WHERE i.appid = a.appid AND i.class IN (2, 3, 4, 5))
          FROM apps a
          WHERE {LISTED} AND a.event_app = 0
-           AND (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2
-                OR (?3 AND a.catalog_source = 'card_page'))
+           AND (a.catalog_checked_at IS NULL OR a.catalog_checked_at < ?2)
          ORDER BY a.owned DESC, a.has_items DESC, a.appid"
     );
     let mut st = c.prepare(&sql)?;
-    let rows = st.query_map(params![family, before, upgrade], |r| {
+    let rows = st.query_map(params![family, before], |r| {
         Ok(CatalogTarget {
             appid: r.get::<_, i64>(0)? as u64,
             has_cards: r.get::<_, Option<i64>>(1)?.map(|v| v != 0),
             evidence: r.get::<_, i64>(2)? != 0,
-            upgrade_only: r.get::<_, i64>(3)? != 0,
         })
     })?;
     rows.collect()
@@ -1031,12 +1023,10 @@ mod tests {
             )
         })
         .unwrap();
-        let targets = db
-            .read(|c| catalog_targets(c, false, now(), false))
-            .unwrap();
+        let targets = db.read(|c| catalog_targets(c, false, now())).unwrap();
         let wanted: Vec<u64> = targets
             .iter()
-            .filter(|t| t.wanted(false))
+            .filter(|t| t.wanted())
             .map(|t| t.appid)
             .collect();
         assert_eq!(
@@ -1098,42 +1088,6 @@ mod tests {
             .unwrap();
         let counts = db.read(|c| catalog_counts(c, false)).unwrap();
         assert_eq!(counts.items, 4);
-        drop(db);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn upgrade_targets_card_page_catalogs() {
-        let (db, dir) = temp_db("upgrade");
-        let owned = vec![OwnedGame {
-            appid: 440,
-            name: "Team Fortress 2".into(),
-            playtime_minutes: 1,
-        }];
-        let item_apps = BTreeMap::new();
-        db.write(|tx| {
-            save_library(
-                tx,
-                &LibraryUpdate {
-                    owned: Some(&owned),
-                    family: None,
-                    item_apps: &item_apps,
-                    reset_items: true,
-                },
-            )?;
-            save_catalog(tx, 440, &[card(1, false), card(1, true)], "card_page")
-        })
-        .unwrap();
-        let stale_before = now() - 30 * 24 * 3600;
-        assert!(db
-            .read(|c| catalog_targets(c, false, stale_before, false))
-            .unwrap()
-            .is_empty());
-        let upgrade = db
-            .read(|c| catalog_targets(c, false, stale_before, true))
-            .unwrap();
-        assert_eq!(upgrade.len(), 1);
-        assert!(upgrade[0].upgrade_only);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -1,6 +1,6 @@
 //! What the signed-in user has beyond the inventory: their Steam Family's
-//! shared library, every emoticon they can use, and their profile items
-//! (backgrounds, frames, avatars and so on, including Points Shop purchases).
+//! shared library and their profile items (backgrounds, frames, avatars and
+//! so on, including Points Shop purchases).
 
 use serde_json::Value;
 
@@ -58,31 +58,6 @@ pub struct OwnedProfileItem {
     pub name: String,
     pub title: Option<String>,
     pub quantity: i64,
-}
-
-/// Emoticons the user can use (`IPlayerService/GetEmoticonList`).
-pub fn parse_emoticons(v: &Value) -> Option<Vec<OwnedProfileItem>> {
-    let resp = v.get("response")?;
-    if !resp.is_object() {
-        return None;
-    }
-    let Some(list) = resp["emoticons"].as_array() else {
-        return Some(Vec::new());
-    };
-    Some(
-        list.iter()
-            .filter_map(|e| {
-                Some(OwnedProfileItem {
-                    appid: int(&e["appid"]).unwrap_or(0).max(0) as u64,
-                    class: class::EMOTICON,
-                    item_type: None,
-                    name: text(&e["name"])?,
-                    title: None,
-                    quantity: int(&e["count"]).unwrap_or(1).max(1),
-                })
-            })
-            .collect(),
-    )
 }
 
 /// The groups in a `IPlayerService/GetProfileItemsOwned` answer, with the item
@@ -158,17 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn emoticons_and_profile_items() {
-        let e = parse_emoticons(&json!({"response": {"emoticons": [
-            {"name": ":steamhappy:", "count": 3, "appid": 753},
-            {"name": ":tf2pyro:", "appid": 440},
-            {"count": 1}
-        ]}}))
-        .unwrap();
-        assert_eq!(e.len(), 2);
-        assert_eq!(e[0].quantity, 3);
-        assert_eq!(e[1].appid, 440);
-
+    fn profile_items() {
         let p = parse_profile_items(&json!({"response": {
             "profile_backgrounds": [{"communityitemid": "55", "appid": 440, "item_type": 11, "item_class": 3, "name": "mannco", "item_title": "Mann Co."}],
             "avatar_frames": [{"communityitemid": "56", "appid": 2861690, "item_type": 4, "item_title": "Frame"}]

@@ -6,7 +6,6 @@
 //! class. Cards also come in a foil version, which shares the type number.
 
 pub mod cardpage;
-pub mod defs;
 pub mod library;
 pub mod points;
 pub mod store;
