@@ -710,7 +710,7 @@ async fn catalog_stages(
         for _ in 0..MAX_POINTS_PAGES {
             let f = state
                 .steam
-                .reward_items(batch, cursor.as_deref(), notify)
+                .reward_items(batch, cursor.as_deref(), true, notify)
                 .await?;
             let Some(page) = f.json().as_ref().and_then(points::parse_page) else {
                 break 'batches;

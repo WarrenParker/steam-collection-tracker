@@ -946,7 +946,28 @@ pub async fn run(
             .take(4),
     );
     let mut detail = Map::new();
-    let page = match steam.reward_items(&batch, None, notify).await {
+    // The same game asked both ways: does Steam also list the items that
+    // can't be bought directly (sale rewards, retired items)?
+    let mut unbuyable_extra: Option<i64> = None;
+    if let (Ok(plain), Ok(all)) = (
+        steam.reward_items(&[sample_app], None, false, notify).await,
+        steam.reward_items(&[sample_app], None, true, notify).await,
+    ) {
+        let count = |f: &Fetched| {
+            f.json()
+                .as_ref()
+                .and_then(points::parse_page)
+                .map(|p| p.items.len() as i64)
+        };
+        if let (Some(a), Some(b)) = (count(&plain), count(&all)) {
+            unbuyable_extra = Some(b - a);
+            detail.insert(
+                "unbuyable_check".into(),
+                json!({ "listed_plain": a, "listed_with_unbuyable": b }),
+            );
+        }
+    }
+    let page = match steam.reward_items(&batch, None, true, notify).await {
         Ok(f) => {
             detail.insert("query".into(), http_detail(&f, 2));
             if let Some(v) = f.json() {
@@ -997,6 +1018,15 @@ pub async fn run(
             );
             detail.insert("next_cursor".into(), json!(page.next_cursor));
             detail.insert("total".into(), json!(page.total));
+            let unbuyable_text = match unbuyable_extra {
+                Some(n) if n > 0 => {
+                    format!(" Asking for items that can't be bought directly added {n} more.")
+                }
+                Some(_) => {
+                    " Asking for items that can't be bought directly added none.".to_string()
+                }
+                None => String::new(),
+            };
             let events_text = events
                 .as_ref()
                 .map(|e| {
@@ -1015,7 +1045,7 @@ pub async fn run(
                 )
             } else {
                 format!(
-                    "App {sample_app}: {}. One request covered {} games with {} items.{events_text}",
+                    "App {sample_app}: {}. One request covered {} games with {} items.{unbuyable_text}{events_text}",
                     kinds_text(&sample_items),
                     per_app.len(),
                     page.items.len()

@@ -448,10 +448,13 @@ impl SteamClient {
     }
 
     /// One page of the Points Shop items for a batch of games.
+    /// With `include_unbuyable`, items that can't be bought directly (sale
+    /// rewards, retired items) are listed too.
     pub async fn reward_items(
         &self,
         appids: &[u64],
         cursor: Option<&str>,
+        include_unbuyable: bool,
         notify: Notify<'_>,
     ) -> Result<Fetched, String> {
         let ids: Vec<(String, String)> = appids
@@ -464,6 +467,9 @@ impl SteamClient {
             ids.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         params.push(("count", count.as_str()));
         params.push(("language", "english"));
+        if include_unbuyable {
+            params.push(("include_direct_purchase_disabled", "true"));
+        }
         if let Some(c) = cursor {
             params.push(("cursor", c));
         }
