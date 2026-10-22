@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager};
 
-use crate::catalog::{cardpage, defs, kind_label, library, points, store, CatalogItem};
+use crate::catalog::{cardpage, kind_label, library, points, store, CatalogItem};
 use crate::housekeeping;
 use crate::jsonutil::int;
 use crate::session::{self, Session};
@@ -74,12 +74,10 @@ const PLAN: &[(&str, &str)] = &[
     ("inventory", "Inventory"),
     ("market_search", "Market items for one game"),
     ("price_history", "Price history for one item"),
-    ("item_defs", "Steam's item list for one game"),
     ("store_cards", "Which games have trading cards"),
     ("card_page", "A game's card set page"),
     ("points_catalog", "Points Shop items for a few games"),
     ("points_owned", "Points Shop items you own"),
-    ("emoticons", "Emoticons you own"),
     ("family", "Steam Family library"),
     ("badge_page", "Badges page"),
 ];
@@ -786,86 +784,6 @@ pub async fn run(
         }
     }
 
-    // 8. Steam's item definitions for the game: the fast route for the catalog.
-    let t = run.start("item_defs");
-    let mut auths: Vec<Auth> = vec![Auth::None, Auth::Key(key.as_str())];
-    if let Some(tok) = token.as_deref() {
-        auths.push(Auth::Token(tok));
-    }
-    let mut attempts = Map::new();
-    let mut defs_result: Option<(Vec<CatalogItem>, &str)> = None;
-    let mut defs_samples = Map::new();
-    let mut defs_status: Option<u16> = None;
-    for auth in &auths {
-        match steam.item_definitions(sample_app, *auth, notify).await {
-            Ok(f) => {
-                attempts.insert(auth.name().into(), http_detail(&f, 3));
-                defs_status = Some(f.status);
-                if f.status == 401 || f.status == 403 {
-                    continue;
-                }
-                if let Some(v) = f.json() {
-                    if let Some(items) = defs::parse(&v) {
-                        if let Some(list) = v["response"]["item_definitions"].as_array() {
-                            for d in list {
-                                let key =
-                                    format!("item_class_{}", int(&d["item_class"]).unwrap_or(0));
-                                defs_samples.entry(key).or_insert_with(|| shape(d, 2));
-                            }
-                        }
-                        defs_result = Some((items, auth.name()));
-                    }
-                }
-                break;
-            }
-            Err(e) => {
-                attempts.insert(auth.name().into(), json!({ "error": e }));
-                break;
-            }
-        }
-    }
-    attempts.insert("samples".into(), Value::Object(defs_samples));
-    let mut defs_cards: Option<usize> = None;
-    match &defs_result {
-        Some((items, auth)) if !items.is_empty() => {
-            defs_cards = Some(defs::card_count(items));
-            let way = match *auth {
-                "none" => "without a key",
-                "key" => "with your API key",
-                _ => "with your sign-in",
-            };
-            run.finish(
-                "item_defs",
-                t,
-                StepStatus::Ok,
-                format!(
-                    "Works {way}: {} for app {sample_app}. This is the fast route for the catalog.",
-                    kinds_text(items)
-                ),
-                Value::Object(attempts),
-            );
-        }
-        Some(_) => run.finish(
-            "item_defs",
-            t,
-            StepStatus::Warn,
-            format!("Steam answered, but listed no items for app {sample_app}. The catalog would use card pages instead, which is slower."),
-            Value::Object(attempts),
-        ),
-        None => run.finish(
-            "item_defs",
-            t,
-            StepStatus::Warn,
-            format!(
-                "Steam's item list isn't available{}. The catalog would use card pages instead, which is slower.",
-                defs_status
-                    .map(|c| format!(" (code {c})"))
-                    .unwrap_or_default()
-            ),
-            Value::Object(attempts),
-        ),
-    }
-
     // 9. The store check: which games have trading cards.
     let t = run.start("store_cards");
     let mut check: Vec<u64> = vec![sample_app];
@@ -982,34 +900,30 @@ pub async fn run(
             }
             let with_images = page.cards.iter().filter(|c| c.image.is_some()).count();
             let names: Vec<&str> = page.cards.iter().take(4).map(|c| c.name.as_str()).collect();
-            let agrees = match defs_cards {
-                Some(n) if n == page.cards.len() => {
-                    " It agrees with Steam's item list.".to_string()
-                }
-                Some(n) => format!(" Steam's item list had {n}."),
-                None => String::new(),
-            };
-            let (status, text) = if !f.is_success() {
-                (
-                    StepStatus::Fail,
-                    format!("Steam answered with code {}.", f.status),
-                )
-            } else if !page.cards.is_empty() {
-                (
-                    StepStatus::Ok,
-                    format!(
-                        "Read {} cards for app {sample_app} ({}{}), {with_images} with artwork.{agrees}",
+            let (status, text) =
+                if !f.is_success() {
+                    (
+                        StepStatus::Fail,
+                        format!("Steam answered with code {}.", f.status),
+                    )
+                } else if !page.cards.is_empty() {
+                    (
+                        StepStatus::Ok,
+                        format!(
+                        "Read {} cards for app {sample_app} ({}{}), {with_images} with artwork.",
                         page.cards.len(),
                         names.join(", "),
                         if page.cards.len() > names.len() { ", …" } else { "" }
                     ),
-                )
-            } else {
-                (
-                    StepStatus::Warn,
-                    format!("The page loaded, but no cards could be read for app {sample_app}."),
-                )
-            };
+                    )
+                } else {
+                    (
+                        StepStatus::Warn,
+                        format!(
+                            "The page loaded, but no cards could be read for app {sample_app}."
+                        ),
+                    )
+                };
             run.finish("card_page", t, status, text, detail);
         }
         Err(e) => run.finish("card_page", t, StepStatus::Fail, e, Value::Null),
@@ -1208,48 +1122,6 @@ pub async fn run(
         }
     }
 
-    // 13. Every emoticon the user can use
-    let t = run.start("emoticons");
-    match token.as_deref() {
-        None => run.finish(
-            "emoticons",
-            t,
-            StepStatus::Skipped,
-            NEEDS_SIGN_IN,
-            Value::Null,
-        ),
-        Some(tok) => match steam.emoticons(tok, notify).await {
-            Ok(f) => {
-                let list = f.json().as_ref().and_then(library::parse_emoticons);
-                let detail = http_detail(&f, 3);
-                match list {
-                    Some(list) => {
-                        let games: BTreeSet<u64> = list.iter().map(|e| e.appid).collect();
-                        run.finish(
-                            "emoticons",
-                            t,
-                            StepStatus::Ok,
-                            format!(
-                                "You can use {} emoticons from {} games.",
-                                fmt_num(list.len() as u64),
-                                fmt_num(games.len() as u64)
-                            ),
-                            detail,
-                        );
-                    }
-                    None => run.finish(
-                        "emoticons",
-                        t,
-                        StepStatus::Fail,
-                        format!("Steam didn't return your emoticons (code {}).", f.status),
-                        detail,
-                    ),
-                }
-            }
-            Err(e) => run.finish("emoticons", t, StepStatus::Fail, e, Value::Null),
-        },
-    }
-
     // 14. Steam Family library
     let t = run.start("family");
     match token.as_deref() {
@@ -1371,19 +1243,16 @@ pub async fn run(
             .max((owned_count as f64 * ratio).round() as usize),
         None => apps.len(),
     };
-    let fast = defs_cards.is_some();
-    let per_game = if fast { 0.5 } else { 4.2 };
-    let seconds = card_games as f64 * per_game + 30.0;
+    let seconds = card_games as f64 * 4.2 + 30.0;
     let minutes = (seconds / 60.0).ceil() as u64;
     let estimate = if card_games == 0 {
         "The full scan time couldn't be estimated because no games with trading cards were found yet."
             .to_string()
     } else {
         format!(
-            "A first full scan would take about {} for roughly {} games with trading cards, using {}. Later scans only read what's new.",
+            "A first full scan would take about {} for roughly {} games with trading cards. Later scans only read what's new.",
             plural(minutes, "minute"),
-            fmt_num(card_games as u64),
-            if fast { "Steam's item list" } else { "card pages" }
+            fmt_num(card_games as u64)
         )
     };
 

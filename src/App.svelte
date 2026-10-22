@@ -58,6 +58,8 @@
       requestAnimationFrame(() => {
         api.appReady().catch(() => {});
       });
+      // Steam's web pages expect a browser; the app's requests use WebView2's own identity.
+      api.reportBrowserAgent(navigator.userAgent).catch(() => {});
       unlisten = await on<UpdateState>('update-status', (u) => (update = u));
     })();
     return () => unlisten?.();

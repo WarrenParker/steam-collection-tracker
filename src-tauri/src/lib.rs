@@ -41,6 +41,7 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::app_ready,
+            commands::report_browser_agent,
             commands::get_app_info,
             commands::get_settings,
             commands::update_preferences,

@@ -102,7 +102,6 @@ export interface ScanStatus {
   seconds_left: number | null;
   remaining: number;
   remaining_seconds: number | null;
-  slow_route: boolean;
   resume_at: number | null;
   message: string | null;
   pause_requested: boolean;
@@ -178,6 +177,7 @@ export interface VersionList {
 
 export const api = {
   appReady: () => invoke<void>('app_ready'),
+  reportBrowserAgent: (agent: string) => invoke<void>('report_browser_agent', { agent }),
   appInfo: () => invoke<AppInfo>('get_app_info'),
   settings: () => invoke<SettingsView>('get_settings'),
   updatePreferences: (patch: { theme?: Theme; auto_update?: boolean; include_family?: boolean }) =>

@@ -2,6 +2,18 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.4.1] - 2026-10-22
+
+### Fixed
+
+- Achievement progress now loads. Steam only accepts that request as a form submission, which 0.4.0 didn't send.
+- Requests to Steam's web pages and Market now identify as the browser built into the app. Steam was turning the Market away even though it works in a normal browser on the same connection.
+
+### Removed
+
+- The attempt to read Steam's own item list. Steam only shares it with game developers, so the app now always reads each game's card page.
+- The attempt to read your emoticon list, which Steam doesn't offer to apps. Owned emoticons come from your inventory as before.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added
