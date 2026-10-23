@@ -6,6 +6,11 @@
 //! normal pace, so clicks and small scans stay quick, and holds long reads to
 //! one request every 7.5 seconds, about 480 an hour. If Steam still refuses,
 //! the pace slows by half again and stays slower.
+//!
+//! After a refusal the app leaves that kind of request alone for a while.
+//! Asking again while Steam is still refusing seemed to keep the refusal
+//! going (one retry every 30 minutes was refused for hours), so each refusal
+//! in a row doubles the wait, up to four hours.
 
 use std::time::{Duration, Instant};
 
@@ -15,6 +20,17 @@ pub const BURST: f64 = 60.0;
 pub const PERIOD_MS: u64 = 7_500;
 /// The slowest the pace gets after refusals.
 pub const MAX_PERIOD_MS: u64 = 30_000;
+/// The wait after a first refusal.
+pub const FIRST_BLOCK_MINUTES: u64 = 30;
+/// The longest wait after refusals in a row.
+pub const MAX_BLOCK_MINUTES: u64 = 240;
+
+/// How long to leave a kind of request alone after `refusals` refusals in a
+/// row: 30 minutes, then 1, 2 and 4 hours.
+pub fn block_minutes(refusals: u32) -> u64 {
+    let doublings = refusals.saturating_sub(1).min(8);
+    (FIRST_BLOCK_MINUTES << doublings).min(MAX_BLOCK_MINUTES)
+}
 
 #[derive(Debug, Clone)]
 pub struct Budget {
@@ -140,5 +156,12 @@ mod tests {
         assert_eq!(b.period_ms(), MAX_PERIOD_MS);
         b.set_period_ms(1);
         assert_eq!(b.period_ms(), PERIOD_MS);
+    }
+
+    #[test]
+    fn waits_double_after_refusals_in_a_row() {
+        let waits: Vec<u64> = (0..7).map(block_minutes).collect();
+        assert_eq!(waits, [30, 30, 60, 120, 240, 240, 240]);
+        assert_eq!(block_minutes(u32::MAX), MAX_BLOCK_MINUTES);
     }
 }

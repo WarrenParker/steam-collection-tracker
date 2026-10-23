@@ -2,6 +2,18 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.6.3] - 2026-10-22
+
+### Changed
+
+- **Order books are read when you open a game.** A card that needs several copies is priced by walking up the Market's listings, and that needs the card's order book. Scans used to read over a thousand of them on a large account; now a game reads its own when you open it, with progress shown in its details. Until then, its cost to complete uses each card's cheapest listing and is marked as estimated.
+- **Price history reads the most useful items first:** items you still need in games that count, since their usual price decides cost to complete and whether a far-off listing counts, then items you own, then everything else.
+- Time estimates for price history follow the app's current Market pace.
+
+### Fixed
+
+- **The app waits longer each time Steam refuses in a row,** 30 minutes, then 1, 2 and 4 hours, instead of asking again every 30 minutes. Asking during a refusal seemed to keep it going: one retry every half hour was refused for hours. The wait is remembered when the app restarts.
+
 ## [0.6.2] - 2026-10-22
 
 ### Changed

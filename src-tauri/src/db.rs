@@ -876,16 +876,22 @@ pub fn finish_market_app(c: &Connection, appid: u64, started: i64) -> rusqlite::
 }
 
 /// Market items in games that count for the account whose price history is
-/// missing or due, owned games first.
-pub fn history_targets(c: &Connection, family: bool, now: i64) -> rusqlite::Result<Vec<String>> {
+/// missing or due, owned games first, and whether each has one already.
+pub fn history_targets(
+    c: &Connection,
+    family: bool,
+    now: i64,
+) -> rusqlite::Result<Vec<(String, bool)>> {
     let mut st = c.prepare(&format!(
-        "SELECT m.hash_name FROM market m JOIN apps a ON a.appid = m.appid
+        "SELECT m.hash_name, m.history_at IS NOT NULL FROM market m JOIN apps a ON a.appid = m.appid
          WHERE m.class IN {MARKET_CLASSES}
            AND (a.owned = 1 OR (a.family = 1 AND ?1))
            AND (m.history_due IS NULL OR m.history_due <= ?2)
          ORDER BY a.owned DESC, m.history_at IS NOT NULL, m.appid, m.hash_name"
     ))?;
-    let rows = st.query_map(params![family, now], |r| r.get::<_, String>(0))?;
+    let rows = st.query_map(params![family, now], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
+    })?;
     rows.collect()
 }
 

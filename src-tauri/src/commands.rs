@@ -294,6 +294,26 @@ pub async fn update_price_settings(
     Ok(updated.view())
 }
 
+/// Reads the order books of a game's cards that still need several copies,
+/// when the game is opened, and returns the game with its updated cost.
+/// Progress goes out as "book-progress" events.
+#[tauri::command]
+pub async fn read_game_books(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    appid: u64,
+) -> Result<GameDetail, String> {
+    let cookie = match session::current(&app).await {
+        Ok(Some(s)) => Some(s.community_header()),
+        _ => None,
+    };
+    let emit = |p: prices::BookProgress| {
+        let _ = app.emit("book-progress", p);
+    };
+    prices::game_books(&state, appid, cookie.as_deref(), &emit).await?;
+    game_detail(&state, appid)
+}
+
 /// An item's price history: the stored last year (read from Steam the first
 /// time), or the whole history read fresh with `full`.
 #[tauri::command]

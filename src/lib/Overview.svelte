@@ -404,8 +404,8 @@
             {/if}
             {#if prices.cost_estimated > 0}
               <p class="section-note small-note">
-                {num(prices.cost_estimated)} {prices.cost_estimated === 1 ? 'card is' : 'cards are'} estimated at today's
-                cheapest listing until {prices.cost_estimated === 1 ? 'its order book is' : 'their order books are'} read.
+                {num(prices.cost_estimated)} {prices.cost_estimated === 1 ? 'item is' : 'items are'} estimated. Opening a
+                game reads the Market's listings for its cards, which makes its cost exact.
               </p>
             {/if}
             <p class="section-note small-note">

@@ -25,8 +25,9 @@ pub const STORE: &str = "https://store.steampowered.com";
 /// Used for Steam's web pages until the interface reports WebView2's own identity.
 const FALLBACK_BROWSER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0";
 
-/// How long the app leaves a kind of request alone after Steam refuses it.
-pub const BLOCK_MINUTES: u64 = 30;
+/// How long the app leaves a kind of request alone after Steam first refuses
+/// it. Refusals in a row wait longer (see `budget::block_minutes`).
+pub const BLOCK_MINUTES: u64 = budget::FIRST_BLOCK_MINUTES;
 
 /// Called with short, plain-language status messages (for example when waiting).
 pub type Notify<'a> = &'a (dyn Fn(String) + Send + Sync);
@@ -143,6 +144,8 @@ pub struct SteamClient {
     last: Mutex<HashMap<Bucket, Instant>>,
     /// (kind of request, signed in) -> refused until.
     blocked: std::sync::Mutex<HashMap<(Bucket, bool), Instant>>,
+    /// Refusals in a row for each kind of request, cleared by an answer.
+    refusals: std::sync::Mutex<HashMap<Bucket, u32>>,
     requests: AtomicU32,
     browser_agent: std::sync::Mutex<Option<String>>,
     /// Keeps long Market reads under the rate Steam refuses.
@@ -165,6 +168,7 @@ impl SteamClient {
             http,
             last: Mutex::new(HashMap::new()),
             blocked: std::sync::Mutex::new(HashMap::new()),
+            refusals: std::sync::Mutex::new(HashMap::new()),
             requests: AtomicU32::new(0),
             browser_agent: std::sync::Mutex::new(None),
             market_budget: std::sync::Mutex::new(budget::Budget::default()),
@@ -188,11 +192,48 @@ impl SteamClient {
             .is_some_and(|until| Instant::now() < *until)
     }
 
+    /// Seconds until this kind of request is allowed again, or 0.
+    pub fn wait_seconds(&self, bucket: Bucket, signed_in: bool) -> u64 {
+        let blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
+        blocked.get(&(bucket, signed_in)).map_or(0, |until| {
+            until.saturating_duration_since(Instant::now()).as_secs()
+        })
+    }
+
+    /// Refusals in a row for this kind of request.
+    pub fn refusals(&self, bucket: Bucket) -> u32 {
+        let refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+        refusals.get(&bucket).copied().unwrap_or(0)
+    }
+
+    /// Restores refusals and a wait saved before the app last closed, so a
+    /// restart doesn't ask Steam again too soon.
+    pub fn restore_block(&self, bucket: Bucket, refusals: u32, seconds_left: u64) {
+        self.refusals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(bucket, refusals);
+        if seconds_left > 0 {
+            let until = Instant::now() + Duration::from_secs(seconds_left);
+            let mut blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
+            for signed_in in [false, true] {
+                blocked.insert((bucket, signed_in), until);
+            }
+        }
+    }
+
     fn block(&self, bucket: Bucket, signed_in: bool) {
+        let refusals = {
+            let mut refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+            let n = refusals.entry(bucket).or_insert(0);
+            *n = n.saturating_add(1);
+            *n
+        };
+        let minutes = budget::block_minutes(refusals);
         let mut blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
         blocked.insert(
             (bucket, signed_in),
-            Instant::now() + Duration::from_secs(BLOCK_MINUTES * 60),
+            Instant::now() + Duration::from_secs(minutes * 60),
         );
         drop(blocked);
         if bucket == Bucket::Market {
@@ -361,6 +402,11 @@ impl SteamClient {
                         if bucket != Bucket::WebApi {
                             self.block(bucket, signed_in);
                         }
+                    } else if bucket != Bucket::WebApi {
+                        self.refusals
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&bucket);
                     }
                     let final_url = resp.url().to_string();
                     let body = resp.text().await.map_err(|e| network_message(&e))?;
