@@ -4,6 +4,7 @@ mod completion;
 mod db;
 mod diagnostics;
 mod hexutil;
+mod history;
 mod housekeeping;
 mod jsonutil;
 mod market;
