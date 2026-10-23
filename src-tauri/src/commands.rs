@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
-use crate::completion::{self, AccountCompletion, Availability, GameCompletion, ItemView};
+use crate::completion::{self, AccountCompletion, Availability, GameCompletion, Group, ItemView};
 use crate::db::{self, GameRow};
 use crate::diagnostics::{self, DiagStep, DiagnosticsResult};
 use crate::housekeeping;
@@ -233,6 +233,144 @@ fn game_detail(state: &AppState, appid: u64) -> Result<GameDetail, String> {
 #[tauri::command]
 pub fn get_game_detail(state: State<'_, AppState>, appid: u64) -> Result<GameDetail, String> {
     game_detail(&state, appid)
+}
+
+/// One row of the all-items list: what the list shows, sorts and filters on.
+/// The item panel asks for the full item with `get_item`.
+#[derive(Serialize)]
+pub struct ItemRow {
+    key: String,
+    appid: u64,
+    group: Group,
+    /// What kind of item it is, like "Emoticon" or "Animated avatar".
+    kind: &'static str,
+    foil: bool,
+    name: String,
+    image: Option<String>,
+    held: u64,
+    have: u32,
+    needed: u32,
+    counted: bool,
+    availability: Availability,
+    tags: Vec<&'static str>,
+    on_market: bool,
+    /// Today's cheapest listing, in mills.
+    price: Option<i64>,
+    average: Option<i64>,
+    change: Option<f64>,
+    points_cost: Option<i64>,
+    value: Option<i64>,
+    cost: Option<i64>,
+    cost_points: Option<i64>,
+}
+
+impl From<&ItemView> for ItemRow {
+    fn from(i: &ItemView) -> Self {
+        let p = i.price.as_ref();
+        Self {
+            key: i.key.clone(),
+            appid: i.appid,
+            group: i.group,
+            kind: i.kind,
+            foil: i.foil,
+            name: i.name.clone(),
+            image: i.image.clone(),
+            held: i.held,
+            have: i.have,
+            needed: i.needed,
+            counted: i.counted,
+            availability: i.availability,
+            tags: i.tags.clone(),
+            on_market: p.is_some_and(|p| p.on_market),
+            price: p.filter(|p| p.on_market).and_then(|p| p.lowest),
+            average: p.and_then(|p| p.average),
+            change: p.and_then(|p| p.change),
+            points_cost: i.points_cost,
+            value: i.value,
+            cost: i.cost,
+            cost_points: i.cost_points,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct GameName {
+    appid: u64,
+    name: String,
+    owned: bool,
+    family: bool,
+    event: bool,
+}
+
+#[derive(Serialize)]
+pub struct ItemsView {
+    items: Vec<ItemRow>,
+    /// The games the items belong to, for names and the game filter.
+    games: Vec<GameName>,
+    currency: String,
+}
+
+/// Every item of every listed game, for the all-items list and search.
+#[tauri::command]
+pub fn get_items(state: State<'_, AppState>) -> Result<ItemsView, String> {
+    let rules = rules(&state);
+    let snap = state.snapshot(rules)?;
+    let games = state.db.read(|c| db::games(c, rules.include_family))?;
+    let listed: std::collections::HashSet<u64> = games.iter().map(|g| g.appid).collect();
+    Ok(ItemsView {
+        items: snap
+            .items
+            .iter()
+            .filter(|i| listed.contains(&i.appid))
+            .map(ItemRow::from)
+            .collect(),
+        games: games
+            .into_iter()
+            .map(|g| GameName {
+                appid: g.appid,
+                name: g.name,
+                owned: g.owned,
+                family: g.family,
+                event: g.event,
+            })
+            .collect(),
+        currency: snap.account.currency.clone(),
+    })
+}
+
+#[derive(Serialize)]
+pub struct ItemDetail {
+    item: ItemView,
+    game_name: Option<String>,
+    currency: String,
+}
+
+fn item_detail(state: &AppState, key: &str) -> Result<ItemDetail, String> {
+    let rules = rules(state);
+    let snap = state.snapshot(rules)?;
+    let item = snap
+        .items
+        .iter()
+        .find(|i| i.key == key)
+        .cloned()
+        .ok_or_else(|| "That item isn't in your collection's lists any more.".to_string())?;
+    let game_name = state
+        .db
+        .read(|c| db::games(c, true))?
+        .into_iter()
+        .find(|g| g.appid == item.appid)
+        .map(|g| g.name);
+    Ok(ItemDetail {
+        item,
+        game_name,
+        currency: snap.account.currency.clone(),
+    })
+}
+
+/// One item in full, for the item panel.
+#[tauri::command]
+pub fn get_item(state: State<'_, AppState>, key: String) -> Result<ItemDetail, String> {
+    item_detail(&state, &key)
 }
 
 /// Sets an item's availability by hand, or hands it back to the app with `None`.

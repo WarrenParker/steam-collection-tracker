@@ -23,6 +23,8 @@ The app is in early development. It reads your profile, games, badges and invent
 - One portable exe. Nothing to install, and it updates itself.
 - Lists every game you own or have items for, and optionally your Steam Family's shared games.
 - Catalogs every item those games have: cards, foil cards, emoticons, backgrounds, booster packs and Points Shop items.
+- Shows how complete each game and your whole account is, what your items are worth, and what finishing would cost on the Market and in the Points Shop.
+- Every item in one fast, sortable list with filters, an art grid for each game, and Ctrl+K search across games and items.
 - Scans in the background, and can pause and pick up where it left off.
 - Optional sign-in through Steam's own page, so the app can read your inventory and Points Shop items.
 - Greyscale, dark and light themes.

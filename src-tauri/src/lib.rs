@@ -57,6 +57,8 @@ pub fn run() {
             commands::get_games,
             commands::get_completion,
             commands::get_game_detail,
+            commands::get_items,
+            commands::get_item,
             commands::set_item_availability,
             commands::get_price_history,
             commands::read_game_books,
