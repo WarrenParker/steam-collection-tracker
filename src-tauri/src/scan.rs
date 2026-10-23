@@ -1021,17 +1021,30 @@ pub(crate) fn duration_text(seconds: u64) -> String {
         }
     };
     if seconds < 60 {
-        plural(seconds.max(1), "second")
-    } else if seconds < 3600 {
-        plural(seconds.div_ceil(60), "minute")
-    } else {
-        let hours = seconds / 3600;
-        let minutes = (seconds % 3600).div_ceil(60);
-        if minutes == 0 {
-            plural(hours, "hour")
-        } else {
-            format!("{} {}", plural(hours, "hour"), plural(minutes, "minute"))
-        }
+        return plural(seconds.max(1), "second");
+    }
+    // Round up to whole minutes first, so 1:59:59 reads "2 hours".
+    let total = seconds.div_ceil(60);
+    let (hours, minutes) = (total / 60, total % 60);
+    match (hours, minutes) {
+        (0, m) => plural(m, "minute"),
+        (h, 0) => plural(h, "hour"),
+        (h, m) => format!("{} {}", plural(h, "hour"), plural(m, "minute")),
+    }
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::duration_text;
+
+    #[test]
+    fn rounds_up_to_whole_minutes_before_splitting_hours() {
+        assert_eq!(duration_text(30), "30 seconds");
+        assert_eq!(duration_text(61), "2 minutes");
+        assert_eq!(duration_text(3599), "1 hour");
+        assert_eq!(duration_text(7199), "2 hours");
+        assert_eq!(duration_text(7260), "2 hours 1 minute");
+        assert_eq!(duration_text(5400), "1 hour 30 minutes");
     }
 }
 

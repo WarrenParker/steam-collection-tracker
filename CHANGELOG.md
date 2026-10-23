@@ -2,6 +2,14 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.2] - 2026-10-23
+
+### Fixed
+
+- Waits read "2 hours" rather than "1 hour 60 minutes".
+- Sorting items by name puts emoticons in order of the word inside their colons, and numbers in number order.
+- In the Items list, the first arrow key press starts from the rows on screen instead of jumping back to the top.
+
 ## [0.8.1] - 2026-10-23
 
 ### Fixed

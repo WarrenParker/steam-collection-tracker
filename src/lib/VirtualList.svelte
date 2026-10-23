@@ -39,6 +39,11 @@
     else if (top + rowHeight > viewport.scrollTop + height) viewport.scrollTop = top + rowHeight - height;
   }
 
+  /** The first row at least half on screen. */
+  export function firstVisible(): number {
+    return Math.min(items.length - 1, Math.max(0, Math.round(scrollTop / rowHeight)));
+  }
+
   export function toTop() {
     if (viewport) viewport.scrollTop = 0;
   }
