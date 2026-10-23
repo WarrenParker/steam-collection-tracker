@@ -73,6 +73,11 @@
     }
   }
 
+  /** "Foil cards" to "Foil card", for one item. */
+  function singular(kind: string): string {
+    return kind.endsWith('s') && !kind.endsWith('ss') ? kind.slice(0, -1) : kind;
+  }
+
   function availabilityLabel(a: Availability): string {
     return AVAILABILITY.find((x) => x.value === a)?.label ?? a;
   }
@@ -109,7 +114,7 @@
           {#if item.image}<img src={item.image} alt="" />{/if}
         </div>
         <div class="hero-text">
-          <div class="hero-kind">{item.kind}{item.foil && !item.kind.toLowerCase().includes('foil') ? ' · Foil' : ''}</div>
+          <div class="hero-kind">{singular(item.kind)}</div>
           <button class="link-button hero-game" onclick={() => openGame(item!.appid)} title="Open this game">
             {detail.game_name ?? `App ${item.appid}`}
           </button>

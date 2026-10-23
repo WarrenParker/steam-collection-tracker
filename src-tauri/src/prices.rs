@@ -139,6 +139,22 @@ fn restore_market(state: &AppState) {
     }
 }
 
+/// The latest time a saved Market wait runs until (Unix time), or 0.
+pub fn saved_wait_until(state: &AppState) -> i64 {
+    META_MARKET_WAIT
+        .iter()
+        .filter_map(|(_, _, until_key)| {
+            state
+                .db
+                .read(|c| db::get_meta(c, until_key))
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<i64>().ok())
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// Seconds per Market request on long reads at the current pace, which is
 /// slower after refusals.
 pub fn seconds_per_request(state: &AppState) -> f64 {

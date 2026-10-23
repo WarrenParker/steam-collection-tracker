@@ -411,7 +411,7 @@
               <ul class="dash-list">
                 {#each dash.cheapest as g (g.appid)}
                   <li>
-                    <button class="dash-row" onclick={() => openGame(g.appid)}>
+                    <button class="dash-row cost-row" onclick={() => openGame(g.appid)}>
                       <span class="row-name">{g.name}</span>
                       <span class="row-sub">{pct(g.percent)}</span>
                       <span class="row-n">{costText(g)}</span>

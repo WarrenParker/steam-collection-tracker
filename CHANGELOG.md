@@ -2,6 +2,21 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.1] - 2026-10-23
+
+### Fixed
+
+- A scan that was waiting for Steam when the app closed carries on by itself after the app opens again, once the wait is over.
+- Under Cheapest to finish, costs that include points no longer run past the card's edge.
+- Emoticons use Steam's larger image, so they're sharp in the art grid and item panel.
+- An item without price history says so in its panel, instead of showing a red "slow down" note.
+- The Games tab's Badge column keeps "Level 5" on one line, and By kind on the dashboard has room for "not counted".
+- An item's panel names its kind in the singular, like "Foil card".
+
+### Changed
+
+- Pages use more of a wide screen and sit in the middle of the window.
+
 ## [0.8.0] - 2026-10-23
 
 ### Added

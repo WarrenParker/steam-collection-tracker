@@ -936,6 +936,17 @@ pub fn history_targets(
     rows.collect()
 }
 
+/// How the most recent scan ended ("done", "paused", "waiting", "failed"),
+/// or `None` before the first scan.
+pub fn last_scan_status(c: &Connection) -> rusqlite::Result<Option<String>> {
+    c.query_row(
+        "SELECT status FROM scans ORDER BY id DESC LIMIT 1",
+        [],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
 /// Whether the Market lists an item by this name.
 pub fn market_has(c: &Connection, hash_name: &str) -> rusqlite::Result<bool> {
     c.query_row(

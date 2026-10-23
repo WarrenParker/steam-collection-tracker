@@ -142,7 +142,13 @@
     {:else if history}
       <p class="muted price-wait">Not enough sales for a chart yet.</p>
     {/if}
-    {#if error}<p class="field-error">{error}</p>{/if}
+    {#if error}
+      {#if p.history_at}
+        <p class="field-error">{error}</p>
+      {:else}
+        <p class="muted price-wait">No price history yet. The scan reads it, a few items at a time. {error}</p>
+      {/if}
+    {/if}
 
     <div class="actions price-actions">
       <button class="btn small" onclick={() => load(true)} disabled={loading || history?.full}>
