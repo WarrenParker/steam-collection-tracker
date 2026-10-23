@@ -219,6 +219,42 @@ export interface ItemsView {
   currency: string;
 }
 
+export interface DashChange {
+  at: number;
+  key: string;
+  appid: number;
+  name: string;
+  game: string;
+  image: string | null;
+  foil: boolean;
+  before: number;
+  after: number;
+}
+
+export interface ProgressPoint {
+  at: number;
+  percent: number | null;
+  complete: number;
+  total: number;
+  game_average: number | null;
+  currency: string;
+  value: number | null;
+  cost: number | null;
+  cost_points: number | null;
+}
+
+export interface Dashboard {
+  closest: GameRow[];
+  cheapest: GameRow[];
+  sell: ItemRow[];
+  buy: ItemRow[];
+  changes: DashChange[];
+  /** Game names for the items in `sell` and `buy`, by app id. */
+  names: Record<string, string>;
+  progress: ProgressPoint[];
+  currency: string;
+}
+
 export interface ItemDetail {
   item: ItemView;
   game_name: string | null;
@@ -407,6 +443,7 @@ export const api = {
   completion: () => invoke<AccountCompletion>('get_completion'),
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
   items: () => invoke<ItemsView>('get_items'),
+  dashboard: () => invoke<Dashboard>('get_dashboard'),
   item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),

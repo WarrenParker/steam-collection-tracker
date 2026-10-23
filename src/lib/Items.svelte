@@ -172,6 +172,19 @@
     };
   });
 
+  // The dashboard can open the list with a filter and sort already set.
+  $effect(() => {
+    const preset = nav.itemsPreset;
+    if (!preset) return;
+    clearFilters();
+    if (preset.have) have = preset.have;
+    if (preset.sort) {
+      sortKey = preset.sort;
+      descending = preset.descending ?? false;
+    }
+    nav.itemsPreset = null;
+  });
+
   // Loads on first show, and again when settings or saved data change.
   $effect(() => {
     void dataKey;

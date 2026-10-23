@@ -183,7 +183,11 @@ fn rules(state: &AppState) -> completion::Rules {
 /// that setting is on, with how complete each one is.
 #[tauri::command]
 pub fn get_games(state: State<'_, AppState>) -> Result<Vec<GameRow>, String> {
-    let rules = rules(&state);
+    game_rows(&state)
+}
+
+fn game_rows(state: &AppState) -> Result<Vec<GameRow>, String> {
+    let rules = rules(state);
     let snap = state.snapshot(rules)?;
     state.db.read(|c| {
         let mut games = db::games(c, rules.include_family)?;
@@ -363,6 +367,143 @@ fn item_detail(state: &AppState, key: &str) -> Result<ItemDetail, String> {
     Ok(ItemDetail {
         item,
         game_name,
+        currency: snap.account.currency.clone(),
+    })
+}
+
+/// An item gained or lost between two scans, for the dashboard.
+#[derive(Serialize)]
+pub struct DashChange {
+    at: i64,
+    key: String,
+    appid: u64,
+    name: String,
+    game: String,
+    image: Option<String>,
+    foil: bool,
+    before: u64,
+    after: u64,
+}
+
+#[derive(Serialize)]
+pub struct Dashboard {
+    /// Games that count, started but not finished, closest to done first.
+    closest: Vec<GameRow>,
+    /// Games that count and aren't finished, cheapest to finish first.
+    cheapest: Vec<GameRow>,
+    /// Items you could sell, listed well above their average now.
+    sell: Vec<ItemRow>,
+    /// Items you still need, listed well below their average now.
+    buy: Vec<ItemRow>,
+    changes: Vec<DashChange>,
+    /// Names of the games `sell` and `buy` belong to.
+    names: std::collections::BTreeMap<u64, String>,
+    /// The account's figures, one point a day, for the last 90 days.
+    progress: Vec<crate::history::ProgressPoint>,
+    currency: String,
+}
+
+const DASH_ROWS: usize = 6;
+
+/// Everything the dashboard shows beyond the account's completion.
+#[tauri::command]
+pub fn get_dashboard(state: State<'_, AppState>) -> Result<Dashboard, String> {
+    let rules = rules(&state);
+    let snap = state.snapshot(rules)?;
+    let games = game_rows(&state)?;
+    let names: std::collections::HashMap<u64, &str> =
+        games.iter().map(|g| (g.appid, g.name.as_str())).collect();
+    let counts = |appid: u64| snap.games.get(&appid).is_some_and(|g| g.counts_for_account);
+    let unfinished: Vec<&GameRow> = games
+        .iter()
+        .filter(|g| counts(g.appid) && g.percent.is_some_and(|p| p < 100.0))
+        .collect();
+
+    let mut closest: Vec<GameRow> = unfinished
+        .iter()
+        .filter(|g| g.percent.is_some_and(|p| p > 0.0))
+        .map(|g| (*g).clone())
+        .collect();
+    closest.sort_by(|a, b| {
+        b.percent
+            .unwrap_or(0.0)
+            .total_cmp(&a.percent.unwrap_or(0.0))
+            .then(a.name.cmp(&b.name))
+    });
+    closest.truncate(DASH_ROWS);
+
+    let mut cheapest: Vec<GameRow> = unfinished
+        .iter()
+        .filter(|g| g.cost.is_some_and(|c| c > 0))
+        .map(|g| (*g).clone())
+        .collect();
+    cheapest.sort_by_key(|g| (g.cost.unwrap_or(i64::MAX), g.cost_points));
+    cheapest.truncate(DASH_ROWS);
+
+    let change = |i: &ItemView| i.price.as_ref().and_then(|p| p.change).unwrap_or(0.0);
+    let mut sell: Vec<&ItemView> = snap
+        .items
+        .iter()
+        .filter(|i| i.sellable > 0 && i.tags.contains(&"Price spike"))
+        .collect();
+    sell.sort_by(|a, b| change(b).total_cmp(&change(a)));
+    let mut buy: Vec<&ItemView> = snap
+        .items
+        .iter()
+        .filter(|i| {
+            i.counted && i.have < i.needed && counts(i.appid) && i.tags.contains(&"Price dip")
+        })
+        .collect();
+    buy.sort_by(|a, b| change(a).total_cmp(&change(b)));
+
+    let by_key: std::collections::HashMap<&str, &ItemView> =
+        snap.items.iter().map(|i| (i.key.as_str(), i)).collect();
+    let since = db::now() - 90 * 86_400;
+    let (recent, progress) = state.db.read(|c| {
+        Ok((
+            crate::history::recent_changes(c, 12)?,
+            crate::history::progress(c, since)?,
+        ))
+    })?;
+    let changes = recent
+        .into_iter()
+        .map(|ch| {
+            let item = by_key.get(ch.key.as_str());
+            DashChange {
+                game: names
+                    .get(&ch.appid)
+                    .map_or_else(|| format!("App {}", ch.appid), |n| n.to_string()),
+                image: item.and_then(|i| i.image.clone()),
+                foil: item.is_some_and(|i| i.foil),
+                at: ch.at,
+                key: ch.key,
+                appid: ch.appid,
+                name: ch.name,
+                before: ch.before,
+                after: ch.after,
+            }
+        })
+        .collect();
+
+    let sell: Vec<ItemRow> = sell
+        .into_iter()
+        .take(DASH_ROWS)
+        .map(ItemRow::from)
+        .collect();
+    let buy: Vec<ItemRow> = buy.into_iter().take(DASH_ROWS).map(ItemRow::from).collect();
+    let item_names = sell
+        .iter()
+        .chain(buy.iter())
+        .filter_map(|i| names.get(&i.appid).map(|n| (i.appid, n.to_string())))
+        .collect();
+    Ok(Dashboard {
+        sell,
+        buy,
+        names: item_names,
+        closest,
+        cheapest,
+        changes,
+        progress,
         currency: snap.account.currency.clone(),
     })
 }

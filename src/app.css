@@ -2537,3 +2537,263 @@ kbd {
 .item-main .item-name {
   display: block;
 }
+
+/* Dashboard */
+
+.page.dash {
+  max-width: 1240px;
+}
+
+.hero-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0 14px;
+}
+
+.dash-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+button.dash-card {
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+
+button.dash-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.dash-card.hero {
+  position: relative;
+  gap: 4px;
+  min-height: 150px;
+  overflow: hidden;
+}
+
+.dash-card.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.dash-card.hero:first-child::before {
+  background: var(--foil);
+  opacity: 1;
+}
+
+.dash-card.quiet {
+  justify-content: center;
+}
+
+.card-label {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.card-value {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-value.foil {
+  background: var(--foil);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.card-sub {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.card-trend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.card-trend svg {
+  flex: none;
+  width: 120px;
+  height: 32px;
+}
+
+.card-trend polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.card-trend .up {
+  color: var(--good);
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dash-card h2 {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.dash-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 64px;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% + 16px);
+  height: 36px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dash-row:hover {
+  background: var(--raised);
+}
+
+.dash-row.with-art {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  height: 44px;
+}
+
+.row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-game {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.row-sub {
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: right;
+}
+
+.row-n {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-n.delta {
+  color: var(--bad);
+}
+
+.row-n.delta.up {
+  color: var(--good);
+}
+
+.day-label {
+  margin: 8px 0 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.typelist.compact li {
+  grid-template-columns: 150px 1fr 56px;
+  height: 28px;
+}
+
+.details {
+  margin-top: 28px;
+}
+
+.details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.details-toggle:hover {
+  color: var(--text);
+}
+
+.details-toggle svg {
+  transition: transform 0.15s;
+}
+
+.details-toggle[aria-expanded='false'] svg {
+  transform: rotate(-90deg);
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 48px;
+  margin-top: 16px;
+}
+
+.details-grid .figures {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.details-grid h2 {
+  font-size: 15px;
+}
+
+@media (max-width: 900px) {
+  .hero-cards,
+  .dash-grid,
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+}

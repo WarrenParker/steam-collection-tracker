@@ -31,7 +31,7 @@
   let itemsShown = $state(false);
 
   const VIEWS: { value: View; label: string }[] = [
-    { value: 'overview', label: 'Overview' },
+    { value: 'overview', label: 'Dashboard' },
     { value: 'games', label: 'Games' },
     { value: 'items', label: 'Items' },
   ];
