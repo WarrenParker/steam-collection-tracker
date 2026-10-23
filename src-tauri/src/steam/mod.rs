@@ -144,8 +144,9 @@ pub struct SteamClient {
     last: Mutex<HashMap<Bucket, Instant>>,
     /// (kind of request, signed in) -> refused until.
     blocked: std::sync::Mutex<HashMap<(Bucket, bool), Instant>>,
-    /// Refusals in a row for each kind of request, cleared by an answer.
-    refusals: std::sync::Mutex<HashMap<Bucket, u32>>,
+    /// Refusals in a row for each kind of request, signed in or not,
+    /// cleared by an answer.
+    refusals: std::sync::Mutex<HashMap<(Bucket, bool), u32>>,
     requests: AtomicU32,
     browser_agent: std::sync::Mutex<Option<String>>,
     /// Keeps long Market reads under the rate Steam refuses.
@@ -201,31 +202,33 @@ impl SteamClient {
     }
 
     /// Refusals in a row for this kind of request.
-    pub fn refusals(&self, bucket: Bucket) -> u32 {
+    pub fn refusals(&self, bucket: Bucket, signed_in: bool) -> u32 {
         let refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
-        refusals.get(&bucket).copied().unwrap_or(0)
+        refusals.get(&(bucket, signed_in)).copied().unwrap_or(0)
     }
 
     /// Restores refusals and a wait saved before the app last closed, so a
     /// restart doesn't ask Steam again too soon.
-    pub fn restore_block(&self, bucket: Bucket, refusals: u32, seconds_left: u64) {
+    pub fn restore_block(&self, bucket: Bucket, signed_in: bool, refusals: u32, seconds_left: u64) {
         self.refusals
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(bucket, refusals);
+            .insert((bucket, signed_in), refusals);
         if seconds_left > 0 {
-            let until = Instant::now() + Duration::from_secs(seconds_left);
-            let mut blocked = self.blocked.lock().unwrap_or_else(|e| e.into_inner());
-            for signed_in in [false, true] {
-                blocked.insert((bucket, signed_in), until);
-            }
+            self.blocked
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    (bucket, signed_in),
+                    Instant::now() + Duration::from_secs(seconds_left),
+                );
         }
     }
 
     fn block(&self, bucket: Bucket, signed_in: bool) {
         let refusals = {
             let mut refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
-            let n = refusals.entry(bucket).or_insert(0);
+            let n = refusals.entry((bucket, signed_in)).or_insert(0);
             *n = n.saturating_add(1);
             *n
         };
@@ -406,7 +409,13 @@ impl SteamClient {
                         self.refusals
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
-                            .remove(&bucket);
+                            .remove(&(bucket, signed_in));
+                        if bucket == Bucket::Market {
+                            self.market_budget
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .answered();
+                        }
                     }
                     let final_url = resp.url().to_string();
                     let body = resp.text().await.map_err(|e| network_message(&e))?;
