@@ -15,6 +15,7 @@
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
   import VersionHistory from './VersionHistory.svelte';
+  import { loadPrefs, savePrefs, type Prefs } from './prefs';
 
   let {
     settings,
@@ -56,6 +57,21 @@
     { value: 'greyscale', label: 'Greyscale' },
     { value: 'dark', label: 'Dark' },
     { value: 'light', label: 'Light' },
+  ];
+
+  let prefs = $state<Prefs>(loadPrefs());
+  function setPref(patch: Partial<Prefs>) {
+    prefs = savePrefs(patch);
+  }
+
+  const SHORTCUTS: [string, string][] = [
+    ['Ctrl K or /', 'Search games and items'],
+    ['Esc', 'Close the topmost panel'],
+    ['↑ ↓', 'Move through the Items list, or step through items with one open'],
+    ['Enter', 'Open the selected item'],
+    ['M', "Open an item's Market page"],
+    ['P', "Open the game's Points Shop"],
+    ['C', "Copy an item's name"],
   ];
 
   let editing = $state<'none' | 'key' | 'profile'>('none');
@@ -234,13 +250,62 @@
   <div class="drawer-body">
     <section class="setting-group">
       <h3>Appearance</h3>
-      <div class="segmented" role="radiogroup" aria-label="Theme">
+      <div class="theme-picker" role="radiogroup" aria-label="Theme">
         {#each themes as t (t.value)}
-          <button role="radio" aria-checked={settings.theme === t.value} onclick={() => setTheme(t.value)}>
-            {t.label}
+          <button
+            class="theme-swatch"
+            data-theme={t.value}
+            role="radio"
+            aria-checked={settings.theme === t.value}
+            onclick={() => setTheme(t.value)}
+          >
+            <span class="swatch-preview" aria-hidden="true">
+              <span class="swatch-bar"></span>
+              <span class="swatch-card"><span></span><span></span></span>
+              <span class="swatch-card"><span></span><span></span></span>
+            </span>
+            <span class="swatch-label">{t.label}</span>
           </button>
         {/each}
       </div>
+    </section>
+
+    <section class="setting-group">
+      <h3>Interface</h3>
+      <div class="setting-row">
+        <div>
+          <div>Open on</div>
+          <div class="desc">The tab the app shows when it starts.</div>
+        </div>
+        <select
+          class="filter-select"
+          value={prefs.startView}
+          onchange={(e) => setPref({ startView: (e.currentTarget as HTMLSelectElement).value as Prefs['startView'] })}
+        >
+          <option value="overview">Dashboard</option>
+          <option value="games">Games</option>
+          <option value="items">Items</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div>Show a game's items as</div>
+          <div class="desc">A list with prices, or a grid of their art.</div>
+        </div>
+        <div class="segmented two" role="radiogroup" aria-label="Show a game's items as">
+          <button role="radio" aria-checked={prefs.gameItems === 'list'} onclick={() => setPref({ gameItems: 'list' })}>List</button>
+          <button role="radio" aria-checked={prefs.gameItems === 'grid'} onclick={() => setPref({ gameItems: 'grid' })}>Art</button>
+        </div>
+      </div>
+      <details class="shortcuts">
+        <summary>Keyboard shortcuts</summary>
+        <dl>
+          {#each SHORTCUTS as [keys, what] (keys)}
+            <dt>{#each keys.split(' or ') as k, n (k)}{#if n > 0}<span class="muted"> or </span>{/if}<kbd>{k}</kbd>{/each}</dt>
+            <dd>{what}</dd>
+          {/each}
+        </dl>
+      </details>
     </section>
 
     <section class="setting-group">

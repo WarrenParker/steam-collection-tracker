@@ -2,6 +2,13 @@ import { api, type GameRow } from './api';
 
 export type View = 'overview' | 'games' | 'items';
 
+/** A starting filter and sort for the Items list, set from the dashboard. */
+export interface ItemsPreset {
+  have?: 'all' | 'owned' | 'missing';
+  sort?: 'name' | 'game' | 'kind' | 'owned' | 'price' | 'average' | 'change';
+  descending?: boolean;
+}
+
 /** What's on screen: the view, and the panels open on top of it. */
 class Nav {
   view = $state<View>('overview');
@@ -10,11 +17,18 @@ class Nav {
   /** The item whose panel is open, by key. */
   item = $state<string | null>(null);
   searchOpen = $state(false);
+  itemsPreset = $state<ItemsPreset | null>(null);
   /** Goes up when something the views show was saved, so they read it again. */
   dataVersion = $state(0);
 }
 
 export const nav = new Nav();
+
+/** Shows the Items list with a filter and sort, clearing any others. */
+export function showItems(preset: ItemsPreset) {
+  nav.itemsPreset = preset;
+  nav.view = 'items';
+}
 
 export function openItem(key: string) {
   nav.item = key;

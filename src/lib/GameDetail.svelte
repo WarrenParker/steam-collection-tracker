@@ -15,6 +15,7 @@
   import { change, holding, money, num, owned, pct, points } from './format';
   import Icon from './Icon.svelte';
   import { nav, openItem } from './nav.svelte.ts';
+  import { loadPrefs, savePrefs } from './prefs';
 
   let {
     game,
@@ -41,7 +42,7 @@
   let error = $state('');
   let saving = $state<string | null>(null);
   // Items as a list with prices, or as a grid of their art.
-  let layout = $state<'list' | 'grid'>(savedLayout());
+  let layout = $state<'list' | 'grid'>(loadPrefs().gameItems);
   // Reading the Market's listings for cards that need several copies.
   let books = $state<BookProgress | null>(null);
   let booksNote = $state('');
@@ -142,21 +143,9 @@
     }
   }
 
-  function savedLayout(): 'list' | 'grid' {
-    try {
-      return localStorage.getItem('game-items-layout') === 'grid' ? 'grid' : 'list';
-    } catch {
-      return 'list';
-    }
-  }
-
   function setLayout(l: 'list' | 'grid') {
     layout = l;
-    try {
-      localStorage.setItem('game-items-layout', l);
-    } catch {
-      // Remembering the choice is only a convenience.
-    }
+    savePrefs({ gameItems: l });
   }
 
   function statusTitle(item: ItemView): string {

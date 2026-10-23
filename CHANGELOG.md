@@ -2,6 +2,20 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.0] - 2026-10-23
+
+### Added
+
+- **Dashboard.** The first tab leads with three cards: how complete your collection is, what your items are worth and what finishing would cost, each with its change since the previous day. Below them: the games closest to complete, the cheapest games to finish, good times to sell (your items listed well above their average) and to buy (items you need listed well below it), recent changes and completion by kind. Click any card or row to go straight to it. Every figure the overview used to show is under "All the figures".
+- **Recent changes.** After each scan that reads your inventory, items you gained, sold, traded or used up are listed by day. The first scan after updating sets the starting point.
+- The account's completion, value and cost to complete are kept once a day, for the trend on the dashboard.
+- Settings: **Open on** chooses the tab the app starts on, and **Show a game's items as** a list or an art grid. The theme picker shows a preview of each theme, and Settings lists the keyboard shortcuts.
+
+### Changed
+
+- Every theme now carries through panels, menus and cards, with its own shadows and a soft accent glow on dark and light.
+- Foil items are edged with the foil sheen everywhere.
+
 ## [0.7.0] - 2026-10-22
 
 ### Added

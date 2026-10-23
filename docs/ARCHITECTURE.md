@@ -84,6 +84,9 @@ The sign-in cookies are kept. Version 0.2.0's `cache/last_scan.json` is moved in
 | `market` | One row per item on the Market, keyed by its Market name: the cheapest listing and how many are listed, a summary of its price history (averages over 30 days, 90 days, a year and all time; lowest and highest days; sales in the last 30 days), the last year of history in a compact form, and the order book's cheapest levels. Prices are kept in thousandths of the currency (mills). |
 | `scans` | One row per scan, with the overview summary it produced. |
 | `meta` | Small values, such as which catalog route works on this connection. |
+| `owned_seen` | What the user held after the last scan that read the inventory, item by item, to compare the next scan with. |
+| `changes` | Items gained or lost between scans (copies before and after), kept for a year, for the dashboard. |
+| `progress` | The account's completion, value and cost to complete, one row a day, for the dashboard's trends. |
 
 The schema version is kept in SQLite's `user_version`. A database the app can't read, or one written by a newer version, is renamed to `collection.old.db` and a fresh one is started; scanning again refills it.
 

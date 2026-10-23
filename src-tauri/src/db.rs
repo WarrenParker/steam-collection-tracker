@@ -18,7 +18,7 @@ use crate::steam::inventory::InvRow;
 use crate::steam::{Badge, OwnedGame};
 
 pub const FILE_NAME: &str = "collection.db";
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// The app's own "game" for Steam-wide items such as gems.
 pub const STEAM_APP: i64 = 753;
@@ -202,6 +202,44 @@ PRAGMA user_version = 4;
 COMMIT;
 ";
 
+/// 0.8.0: what changed between scans. `owned_seen` is what the user had after
+/// the last scan that read the inventory; `changes` lists the differences,
+/// and `progress` keeps the account's figures, one row a day.
+const MIGRATE_V5: &str = "
+BEGIN;
+CREATE TABLE owned_seen (
+    key    TEXT PRIMARY KEY,
+    appid  INTEGER NOT NULL,
+    name   TEXT NOT NULL,
+    held   INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE changes (
+    id           INTEGER PRIMARY KEY,
+    at           INTEGER NOT NULL,
+    key          TEXT NOT NULL,
+    appid        INTEGER NOT NULL,
+    name         TEXT NOT NULL,
+    held_before  INTEGER NOT NULL,
+    held_after   INTEGER NOT NULL
+);
+CREATE INDEX changes_by_time ON changes (at);
+CREATE TABLE progress (
+    day           INTEGER PRIMARY KEY,
+    at            INTEGER NOT NULL,
+    percent       REAL,
+    owned         REAL NOT NULL,
+    complete      INTEGER NOT NULL,
+    total         INTEGER NOT NULL,
+    game_average  REAL,
+    currency      TEXT NOT NULL,
+    value         INTEGER,
+    cost          INTEGER,
+    cost_points   INTEGER
+) WITHOUT ROWID;
+PRAGMA user_version = 5;
+COMMIT;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
     /// Goes up with every saved change, so cached figures know when to refresh.
@@ -293,6 +331,9 @@ fn try_open(path: &Path) -> Result<Connection, String> {
     }
     if version < 4 {
         conn.execute_batch(MIGRATE_V4).map_err(|e| e.to_string())?;
+    }
+    if version < 5 {
+        conn.execute_batch(MIGRATE_V5).map_err(|e| e.to_string())?;
     }
     Ok(conn)
 }

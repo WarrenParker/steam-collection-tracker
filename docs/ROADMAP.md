@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.7.0. Phase 4 is in progress.
+**Now:** version 0.8.0. Phase 4 is in progress.
 
 ## Goal
 
@@ -55,7 +55,8 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Sortable list of all items with filters, Ctrl+K search across games and items, and keyboard shortcuts. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 - ✅ Per-game art grid. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 - ✅ Item detail in a side panel with a small price chart and quick actions. [0.7.0](../CHANGELOG.md#070---2026-10-22)
-- ⬜ Dashboard and sortable game list.
+- ✅ Dashboard: completion, value and cost to complete with daily trends, games closest to complete and cheapest to finish, good times to sell and buy, recent changes. [0.8.0](../CHANGELOG.md#080---2026-10-23)
+- ✅ Sortable game list. [0.4.0](../CHANGELOG.md#040---2026-10-22)
 - ⬜ Full settings panel.
 - ⬜ Virtualized lists, so tens of thousands of items stay smooth. The all-items list is done. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 

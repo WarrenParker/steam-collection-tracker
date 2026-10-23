@@ -6,15 +6,20 @@
     links,
     on,
     type AccountCompletion,
+    type Dashboard,
+    type DashChange,
+    type GameRow,
+    type ItemRow,
     type ProfileView,
     type ScanStatus,
     type ScanSummary,
     type SettingsView,
   } from './api';
-  import { ago, agoUnix, clock, duration, money, num, owned, pct, points, roughly } from './format';
+  import { ago, agoUnix, change, clock, day, duration, money, num, owned, pct, points, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
+  import { nav, openGame, openItem, showItems } from './nav.svelte.ts';
 
   let {
     signedIn,
@@ -34,6 +39,8 @@
 
   let scan = $state<ScanSummary | null>(null);
   let completion = $state<AccountCompletion | null>(null);
+  let dash = $state<Dashboard | null>(null);
+  let detailsOpen = $state(false);
   let status = $state<ScanStatus | null>(null);
   let loaded = $state(false);
   let error = $state('');
@@ -93,7 +100,65 @@
       .completion()
       .then((c) => (completion = c))
       .catch(() => {});
+    api
+      .dashboard()
+      .then((d) => (dash = d))
+      .catch(() => {});
   }
+
+  // Since the day before the latest figures, when there's one.
+  const trend = $derived.by(() => {
+    const pts = dash?.progress ?? [];
+    if (pts.length < 2) return null;
+    const last = pts[pts.length - 1];
+    const prev = pts[pts.length - 2];
+    const line = sparkline(pts.map((p) => p.percent ?? 0));
+    return {
+      since: prev.at,
+      percent: last.percent !== null && prev.percent !== null ? last.percent - prev.percent : null,
+      value: last.value !== null && prev.value !== null && last.currency === prev.currency ? last.value - prev.value : null,
+      cost: last.cost !== null && prev.cost !== null && last.currency === prev.currency ? last.cost - prev.cost : null,
+      line,
+    };
+  });
+
+  /** Points for a small line chart 120 wide and 32 high. */
+  function sparkline(values: number[]): string {
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const span = Math.max(hi - lo, 0.0001);
+    return values
+      .map((v, i) => `${((i / Math.max(1, values.length - 1)) * 120).toFixed(1)},${(30 - ((v - lo) / span) * 28).toFixed(1)}`)
+      .join(' ');
+  }
+
+  function signed(n: number, text: string): string {
+    return `${n > 0 ? '+' : n < 0 ? '−' : ''}${text}`;
+  }
+
+  function changeText(c: DashChange): string {
+    const d = c.after - c.before;
+    return d > 0 ? `+${num(d)}` : `−${num(-d)}`;
+  }
+
+  function costText(g: GameRow): string {
+    const parts: string[] = [];
+    if (g.cost !== null && g.cost > 0) parts.push(money(g.cost, g.currency));
+    if (g.cost_points > 0) parts.push(`${num(g.cost_points)} pts`);
+    return parts.join(' + ');
+  }
+
+  // Recent changes, grouped by the day of the scan that saw them.
+  const changeDays = $derived.by(() => {
+    const days: { label: string; rows: DashChange[] }[] = [];
+    for (const c of dash?.changes ?? []) {
+      const label = day(c.at);
+      const last = days[days.length - 1];
+      if (last && last.label === label) last.rows.push(c);
+      else days.push({ label, rows: [c] });
+    }
+    return days;
+  });
 
   // The settings that change what counts.
   $effect(() => {
@@ -148,10 +213,10 @@
   }
 </script>
 
-<div class="page">
+<div class="page dash">
   <header class="page-head">
     <div>
-      <h1>Overview</h1>
+      <h1>Dashboard</h1>
       <p class="meta">{scannedText}</p>
     </div>
     <div class="head-actions">
@@ -267,6 +332,173 @@
       </div>
     {/each}
 
+    {#if completion && completion.total > 0}
+      <div class="hero-cards">
+        <button class="dash-card hero" onclick={() => (nav.view = 'games')} title="See every game's completion">
+          <span class="card-label">Collection complete</span>
+          <span class="card-value" class:foil={completion.percent === 100}>{pct(completion.percent)}</span>
+          <span class="card-sub">{num(completion.complete)} of {num(completion.total)} items · average game {pct(completion.game_average)}</span>
+          {#if trend}
+            <span class="card-trend">
+              <svg viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"><polyline points={trend.line} /></svg>
+              {#if trend.percent !== null && Math.abs(trend.percent) >= 0.05}
+                <span class:up={trend.percent > 0}>{signed(trend.percent, `${Math.abs(trend.percent).toFixed(1)} pts`)} since {day(trend.since)}</span>
+              {/if}
+            </span>
+          {/if}
+        </button>
+
+        {#if hasPrices && prices}
+          <button
+            class="dash-card hero"
+            onclick={() => showItems({ have: 'owned', sort: 'price', descending: true })}
+            title="See the items you have, most valuable first"
+          >
+            <span class="card-label">Value</span>
+            <span class="card-value">{money(prices.value, cur)}</span>
+            <span class="card-sub">{num(prices.value_copies)} items you could sell · {points(prices.points_value)} that can't be sold</span>
+            {#if trend?.value}
+              <span class="card-trend"><span class:up={trend.value > 0}>{signed(trend.value, money(Math.abs(trend.value), cur))} since {day(trend.since)}</span></span>
+            {/if}
+          </button>
+
+          <button
+            class="dash-card hero"
+            onclick={() => showItems({ have: 'missing', sort: 'price', descending: false })}
+            title="See what you still need, cheapest first"
+          >
+            <span class="card-label">To complete</span>
+            <span class="card-value">{money(prices.cost, cur)}</span>
+            <span class="card-sub">
+              {#if prices.cost_points > 0}+ {points(prices.cost_points)} in the Points Shop{/if}{#if prices.unpriced > 0}{prices.cost_points > 0 ? ' · ' : ''}{num(prices.unpriced)} not for sale right now{/if}
+            </span>
+            {#if trend?.cost}
+              <span class="card-trend"><span class:up={trend.cost < 0}>{signed(trend.cost, money(Math.abs(trend.cost), cur))} since {day(trend.since)}</span></span>
+            {/if}
+          </button>
+        {:else}
+          <div class="dash-card hero quiet">
+            <span class="card-label">Value and cost to complete</span>
+            <span class="card-sub">Prices are read at the end of a scan, game by game.</span>
+          </div>
+        {/if}
+      </div>
+
+      {#if dash}
+        <div class="dash-grid">
+          <section class="dash-card">
+            <h2>Closest to complete</h2>
+            {#if dash.closest.length}
+              <ul class="dash-list">
+                {#each dash.closest as g (g.appid)}
+                  <li>
+                    <button class="dash-row" onclick={() => openGame(g.appid)}>
+                      <span class="row-name">{g.name}</span>
+                      <span class="bar"><span style:width="{g.percent ?? 0}%"></span></span>
+                      <span class="row-n">{pct(g.percent)}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="muted">Nothing started yet.</p>
+            {/if}
+          </section>
+
+          <section class="dash-card">
+            <h2>Cheapest to finish</h2>
+            {#if dash.cheapest.length}
+              <ul class="dash-list">
+                {#each dash.cheapest as g (g.appid)}
+                  <li>
+                    <button class="dash-row" onclick={() => openGame(g.appid)}>
+                      <span class="row-name">{g.name}</span>
+                      <span class="row-sub">{pct(g.percent)}</span>
+                      <span class="row-n">{costText(g)}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="muted">{hasPrices ? 'Every game that counts is done, or has no Market price.' : 'Shown once prices are read.'}</p>
+            {/if}
+          </section>
+
+          {#snippet itemList(rows: ItemRow[], none: string)}
+            {#if rows.length}
+              <ul class="dash-list">
+                {#each rows as i (i.key)}
+                  <li>
+                    <button class="dash-row with-art" onclick={() => openItem(i.key)}>
+                      <span class="thumb tiny" class:foil-edge={i.foil}>{#if i.image}<img src={i.image} alt="" loading="lazy" />{/if}</span>
+                      <span class="row-name">{i.name}<span class="row-game">{dash?.names[String(i.appid)] ?? ''}</span></span>
+                      <span class="row-n">
+                        {money(i.price, dash?.currency ?? cur)}
+                        {#if i.change !== null}<span class="chg" class:up={i.change > 0} class:down={i.change < 0}>{change(i.change)}</span>{/if}
+                      </span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="muted">{none}</p>
+            {/if}
+          {/snippet}
+
+          <section class="dash-card">
+            <h2 title="Items you could sell, listed well above their average price right now">Good time to sell</h2>
+            {@render itemList(dash.sell, hasPrices ? 'None of your items are up much on their average.' : 'Shown once price history is read.')}
+          </section>
+
+          <section class="dash-card">
+            <h2 title="Items you still need, listed well below their average price right now">Good time to buy</h2>
+            {@render itemList(dash.buy, hasPrices ? 'Nothing you need is down much on its average.' : 'Shown once price history is read.')}
+          </section>
+
+          <section class="dash-card">
+            <h2>Recent changes</h2>
+            {#if changeDays.length}
+              {#each changeDays as d (d.label)}
+                <div class="day-label">{d.label}</div>
+                <ul class="dash-list">
+                  {#each d.rows as c (c.key + c.at)}
+                    <li>
+                      <button class="dash-row with-art" onclick={() => openItem(c.key)}>
+                        <span class="thumb tiny" class:foil-edge={c.foil}>{#if c.image}<img src={c.image} alt="" loading="lazy" />{/if}</span>
+                        <span class="row-name">{c.name}<span class="row-game">{c.game}</span></span>
+                        <span class="row-n delta" class:up={c.after > c.before}>{changeText(c)}</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/each}
+            {:else}
+              <p class="muted">Items you gain, sell or use up show here after your next scans.</p>
+            {/if}
+          </section>
+
+          <section class="dash-card">
+            <h2>By kind</h2>
+            <ul class="typelist compact">
+              {#each completion.groups as g (g.group)}
+                <li>
+                  <span class="type-name">{g.label}{#if g.group === 'boosters'}<span class="muted"> · not counted</span>{/if}</span>
+                  <span class="bar"><span style:width="{g.total ? (g.owned / g.total) * 100 : 0}%"></span></span>
+                  <span class="n" title="{owned(g.owned)} of {num(g.total)}">{pct(g.total ? Math.round((1000 * g.owned) / g.total) / 10 : null)}</span>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        </div>
+      {/if}
+    {/if}
+
+    <section class="details">
+      <button class="details-toggle" aria-expanded={detailsOpen} onclick={() => (detailsOpen = !detailsOpen)}>
+        <Icon name="chevron" size={16} /> All the figures
+      </button>
+      {#if detailsOpen}
+        <div class="details-grid">
     <div class="figures">
       <div class="figure">
         <div class="figure-value">{scan.games_visible ? num(scan.games_owned) : '–'}</div>
@@ -288,30 +520,7 @@
       </div>
     </div>
 
-    {#if completion && completion.total > 0}
-      <section class="block collection">
-        <div class="split">
-          <section>
-            <h2>Your collection</h2>
-            <div class="collection-head">
-              <div class="collection-percent" class:foil={completion.percent === 100}>{pct(completion.percent)}</div>
-              <p class="section-note">
-                {num(completion.complete)} of {num(completion.total)} items complete, across the games you own{completion.include_family
-                  ? ' and your Steam Family shares'
-                  : ''}. Cards count by badge level and the copies you hold.
-              </p>
-            </div>
-            <ul class="typelist">
-              {#each completion.groups as g (g.group)}
-                <li>
-                  <span class="type-name">{g.label}{#if g.group === 'boosters'}<span class="muted"> · not counted</span>{/if}</span>
-                  <span class="bar"><span style:width="{g.total ? (g.owned / g.total) * 100 : 0}%"></span></span>
-                  <span class="n" title="{owned(g.owned)} of {num(g.total)}">{pct(g.total ? Math.round((1000 * g.owned) / g.total) / 10 : null)}</span>
-                </li>
-              {/each}
-            </ul>
-          </section>
-
+          {#if completion && completion.total > 0}
           <section>
             <h2>Completion</h2>
             <dl class="facts">
@@ -343,13 +552,8 @@
               {/if}
             </dl>
           </section>
-        </div>
-      </section>
-    {/if}
-
-    {#if hasPrices && prices && completion}
-      <section class="block">
-        <div class="split">
+          {/if}
+          {#if hasPrices && prices && completion}
           <section>
             <h2>Value</h2>
             <div class="collection-head">
@@ -416,13 +620,8 @@
               <p class="section-note small-note">{completion.currency_note}</p>
             {/if}
           </section>
-        </div>
-      </section>
-    {/if}
-
-    {#if catalog}
-      <section class="block">
-        <div class="split">
+          {/if}
+          {#if catalog}
           <section>
             <h2>Item catalog</h2>
             <p class="section-note">
@@ -474,12 +673,7 @@
               <dd>{num(catalog.points_items)}</dd>
             </dl>
           </section>
-        </div>
-      </section>
-    {/if}
-
-    <section class="block">
-      <div class="split">
+          {/if}
         <section>
           <h2>Inventory by type</h2>
           {#if scan.by_type.length}
@@ -530,14 +724,10 @@
             {/if}
           </dl>
         </section>
-      </div>
+        </div>
+      {/if}
     </section>
   {/if}
 
   <Diagnostics />
-
-  <p class="phase-note">
-    This is an early version. Prices are new: the dashboard, sortable item lists and price charts arrive in the
-    next version.
-  </p>
 </div>

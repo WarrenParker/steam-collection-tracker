@@ -455,6 +455,7 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
         None
     };
 
+    let inventory_read = summary.is_none();
     if summary.is_none() {
         let result = read_library(&ctx, &key, &steam_id, session.as_ref(), token.as_deref()).await;
         let mut s = match result {
@@ -498,6 +499,8 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
     let _ = state
         .db
         .write(|tx| db::end_scan(tx, scan_id, status, requests(), text.as_deref()));
+    // What changed since the last scan, and today's figures, for the dashboard.
+    let _ = crate::history::record(state, inventory_read && summary.inventory_visible);
     let _ = app.emit("scan-summary", summary);
 
     match outcome {

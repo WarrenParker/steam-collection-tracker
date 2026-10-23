@@ -20,6 +20,9 @@
   import UpdateBar from './lib/UpdateBar.svelte';
   import Icon from './lib/Icon.svelte';
   import { closeTop, dataChanged, nav, typing, type View } from './lib/nav.svelte.ts';
+  import { loadPrefs } from './lib/prefs';
+
+  nav.view = loadPrefs().startView;
 
   let settings = $state<SettingsView | null>(null);
   let info = $state<AppInfo | null>(null);
@@ -31,7 +34,7 @@
   let itemsShown = $state(false);
 
   const VIEWS: { value: View; label: string }[] = [
-    { value: 'overview', label: 'Overview' },
+    { value: 'overview', label: 'Dashboard' },
     { value: 'games', label: 'Games' },
     { value: 'items', label: 'Items' },
   ];
