@@ -15,7 +15,8 @@
   --foil: linear-gradient(115deg, #b9c7ff 0%, #f0c3f7 33%, #bff3e6 66%, #fbe7b0 100%);
 }
 
-:root[data-theme='greyscale'] {
+:root[data-theme='greyscale'],
+[data-theme='greyscale'] {
   --bg: #262626;
   --surface: #2d2d2d;
   --raised: #363636;
@@ -40,7 +41,8 @@
   --glow: transparent;
 }
 
-:root[data-theme='dark'] {
+:root[data-theme='dark'],
+[data-theme='dark'] {
   --bg: #14161a;
   --surface: #1b1e23;
   --raised: #23272e;
@@ -65,7 +67,8 @@
   --glow: radial-gradient(1200px 420px at 85% -10%, rgba(142, 170, 255, 0.07), transparent 70%);
 }
 
-:root[data-theme='light'] {
+:root[data-theme='light'],
+[data-theme='light'] {
   color-scheme: light;
   --bg: #f2f2f0;
   --surface: #ffffff;
@@ -2810,4 +2813,100 @@ button.dash-card:hover {
   .details-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Settings: theme picker and shortcuts */
+
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.theme-swatch[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.swatch-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 8px 34px;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+.swatch-bar {
+  grid-column: 1 / -1;
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.swatch-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.swatch-card span:first-child {
+  height: 5px;
+  width: 70%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.swatch-card span:last-child {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--track);
+}
+
+.swatch-label {
+  text-align: center;
+}
+
+.shortcuts {
+  margin-top: 10px;
+}
+
+.shortcuts summary {
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.shortcuts dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  margin: 12px 0 0;
+}
+
+.shortcuts dt {
+  white-space: nowrap;
+}
+
+.shortcuts dd {
+  margin: 0;
+  color: var(--text-2);
 }
