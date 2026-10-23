@@ -13,6 +13,9 @@ Ideas that aren't scheduled yet, and requests that have shipped. When an idea is
 - ⬜ **SteamHunters and achievements.** Show achievement progress next to each game's collection, through SteamHunters or Steam's own achievement data. *Added Oct 22, 2026.*
 - ⬜ **Prices from everyone's apps.** Let every copy of the app add the prices it reads to the shared price file, so games outside the owner's library are covered too. This needs a small server that checks what it's sent before it's shared. *Added Oct 22, 2026.*
 - ⬜ **Price history refresh setting.** Choose how often price histories are read again: monthly (about 1 GB of downloads a month for a large collection) or every three months (about a third of that). *Added Oct 22, 2026.*
+- ⬜ **Always-on price updater on the owner's PC.** A small background mode that keeps the shared price file fresh every day, even when the app's window isn't open, so friends always download recent prices. *Added Oct 22, 2026.*
+- ⬜ **Free cloud host for the shared prices.** Serve the price file from a free host with a cache in front (such as Cloudflare), and later accept checked price uploads from friends' apps there, so no home PC has to stay on or be reachable from the internet. *Added Oct 22, 2026.*
+- ⬜ **Prices first, history later.** On a first scan, read every game's current prices (about an hour) and show value and cost to complete straight away, then fill in price history only for items you need or own, and for others when you open them. *Added Oct 22, 2026.*
 - ⬜ **Bulk price services.** Check whether paid Steam Market data services cover trading cards, emoticons and backgrounds, and what they cost, as another way to fill prices quickly. *Added Oct 22, 2026.*
 
 ## Shipped
