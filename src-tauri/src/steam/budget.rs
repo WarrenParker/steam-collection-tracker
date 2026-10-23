@@ -20,6 +20,8 @@ pub const BURST: f64 = 60.0;
 pub const PERIOD_MS: u64 = 7_500;
 /// The slowest the pace gets after refusals.
 pub const MAX_PERIOD_MS: u64 = 30_000;
+/// Answers in a row after which a pace slowed by refusals speeds back up a step.
+pub const RECOVER_AFTER: u32 = 50;
 /// The wait after a first refusal.
 pub const FIRST_BLOCK_MINUTES: u64 = 30;
 /// The longest wait after refusals in a row.
@@ -37,6 +39,8 @@ pub struct Budget {
     tokens: f64,
     period_ms: u64,
     last: Option<Instant>,
+    /// Answers since the last refusal or speed-up.
+    answered: u32,
 }
 
 impl Default for Budget {
@@ -51,6 +55,7 @@ impl Budget {
             tokens: BURST,
             period_ms: period_ms.clamp(PERIOD_MS, MAX_PERIOD_MS),
             last: None,
+            answered: 0,
         }
     }
 
@@ -89,6 +94,21 @@ impl Budget {
     pub fn slow_down(&mut self) {
         self.period_ms = (self.period_ms * 3 / 2).clamp(PERIOD_MS, MAX_PERIOD_MS);
         self.tokens = 0.0;
+        self.answered = 0;
+    }
+
+    /// After an answer: a pace slowed by refusals speeds back up a step every
+    /// `RECOVER_AFTER` answers in a row, until it's back to normal.
+    pub fn answered(&mut self) {
+        if self.period_ms <= PERIOD_MS {
+            self.answered = 0;
+            return;
+        }
+        self.answered += 1;
+        if self.answered >= RECOVER_AFTER {
+            self.answered = 0;
+            self.period_ms = (self.period_ms * 2 / 3).clamp(PERIOD_MS, MAX_PERIOD_MS);
+        }
     }
 }
 
@@ -156,6 +176,27 @@ mod tests {
         assert_eq!(b.period_ms(), MAX_PERIOD_MS);
         b.set_period_ms(1);
         assert_eq!(b.period_ms(), PERIOD_MS);
+    }
+
+    #[test]
+    fn speeds_back_up_after_answers_in_a_row() {
+        let mut b = Budget::new(MAX_PERIOD_MS);
+        let mut steps = Vec::new();
+        for _ in 0..4 {
+            for _ in 0..RECOVER_AFTER {
+                b.answered();
+            }
+            steps.push(b.period_ms());
+        }
+        assert_eq!(steps, [20_000, 13_333, 8_888, PERIOD_MS]);
+        // A refusal starts the count again.
+        let mut b = Budget::new(MAX_PERIOD_MS);
+        for _ in 0..RECOVER_AFTER - 1 {
+            b.answered();
+        }
+        b.slow_down();
+        b.answered();
+        assert_eq!(b.period_ms(), MAX_PERIOD_MS);
     }
 
     #[test]

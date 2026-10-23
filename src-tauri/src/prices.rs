@@ -55,9 +55,15 @@ const META_CURRENCY_AT: &str = "market_currency_at";
 /// The Market pace, kept slower after Steam refused a long read.
 const META_MARKET_PERIOD: &str = "market_period_ms";
 /// Market refusals in a row, and when the app may ask again (Unix time),
-/// kept so a restart doesn't ask too soon.
-const META_MARKET_REFUSALS: &str = "market_refusals";
-const META_MARKET_BLOCKED_UNTIL: &str = "market_blocked_until";
+/// signed in and not, kept so a restart doesn't ask too soon.
+const META_MARKET_WAIT: [(bool, &str, &str); 2] = [
+    (false, "market_refusals_anon", "market_blocked_until_anon"),
+    (
+        true,
+        "market_refusals_signed_in",
+        "market_blocked_until_signed_in",
+    ),
+];
 /// Something always on the Market, used to learn which currency Steam answers in.
 const PROBE_ITEM: &str = "753-Sack of Gems";
 const RATES_URL: &str = "https://api.frankfurter.dev/v2/rates";
@@ -122,10 +128,14 @@ fn restore_market(state: &AppState) {
     if let Some(ms) = meta(META_MARKET_PERIOD) {
         state.steam.set_market_period_ms(ms.max(0) as u64);
     }
-    let refusals = meta(META_MARKET_REFUSALS).unwrap_or(0).clamp(0, 100) as u32;
-    let left = meta(META_MARKET_BLOCKED_UNTIL).map_or(0, |t| (t - db::now()).max(0) as u64);
-    if refusals > 0 || left > 0 {
-        state.steam.restore_block(Bucket::Market, refusals, left);
+    for (signed_in, refusals_key, until_key) in META_MARKET_WAIT {
+        let refusals = meta(refusals_key).unwrap_or(0).clamp(0, 100) as u32;
+        let left = meta(until_key).map_or(0, |t| (t - db::now()).max(0) as u64);
+        if refusals > 0 || left > 0 {
+            state
+                .steam
+                .restore_block(Bucket::Market, signed_in, refusals, left);
+        }
     }
 }
 
@@ -138,15 +148,18 @@ pub fn seconds_per_request(state: &AppState) -> f64 {
 
 /// Saves the Market pace, refusals in a row and any wait, for the next run
 /// and the next app start.
-fn save_market(state: &AppState, signed_in: bool) {
+fn save_market(state: &AppState) {
     let ms = state.steam.market_period_ms().to_string();
-    let refusals = state.steam.refusals(Bucket::Market).to_string();
-    let wait = state.steam.wait_seconds(Bucket::Market, signed_in);
-    let until = (if wait > 0 { db::now() + wait as i64 } else { 0 }).to_string();
     let _ = state.db.write(|tx| {
         db::set_meta(tx, META_MARKET_PERIOD, &ms)?;
-        db::set_meta(tx, META_MARKET_REFUSALS, &refusals)?;
-        db::set_meta(tx, META_MARKET_BLOCKED_UNTIL, &until)
+        for (signed_in, refusals_key, until_key) in META_MARKET_WAIT {
+            let refusals = state.steam.refusals(Bucket::Market, signed_in);
+            let wait = state.steam.wait_seconds(Bucket::Market, signed_in);
+            let until = if wait > 0 { db::now() + wait as i64 } else { 0 };
+            db::set_meta(tx, refusals_key, &refusals.to_string())?;
+            db::set_meta(tx, until_key, &until.to_string())?;
+        }
+        Ok(())
     });
 }
 
@@ -160,7 +173,7 @@ pub(crate) async fn stages(
     let state = ctx.state;
     restore_market(state);
     let outcome = run_stages(ctx, family_on, resume, cookie).await;
-    save_market(state, cookie.is_some());
+    save_market(state);
     outcome
 }
 
@@ -304,6 +317,7 @@ async fn run_stages(
         return Ok(RunEnd::NeedsPriceConfirm { items: total });
     }
 
+    // Price history is read without sign-in (see `fetch_history`).
     ctx.stage(6, "Reading price history…", total);
     let timer = Timer::new();
     let mut done = 0u64;
@@ -311,14 +325,14 @@ async fn run_stages(
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
         }
-        if state.steam.is_blocked(Bucket::Market, signed_in) {
-            return Ok(waiting(state, signed_in));
+        if state.steam.is_blocked(Bucket::Market, false) {
+            return Ok(waiting(state, false));
         }
         let t = Instant::now();
         let outcome = fetch_history(state, hash, cookie, notify).await?;
         timer.add(t);
         match outcome {
-            History::Refused => return Ok(waiting(state, signed_in)),
+            History::Refused => return Ok(waiting(state, false)),
             History::Read(h) => save_history(state, hash, &h)?,
             History::Unreadable => {
                 data.write(|tx| db::postpone_history(tx, hash, db::now() + RETRY_DAYS * DAY))?
@@ -381,15 +395,18 @@ pub(crate) enum History {
     Unreadable,
 }
 
-/// One item's whole history: the newer route first, then the older one when
-/// signed in.
+/// One item's whole history, from the newer route without sign-in. Steam
+/// refused signed-in price history after a day of reading (one request every
+/// half hour for hours) while answering the same request without sign-in, so
+/// it seems to limit it per account. The older route, which needs sign-in, is
+/// only tried when the newer one answers with something unreadable.
 async fn fetch_history(
     state: &AppState,
     hash: &str,
     cookie: Option<&str>,
     notify: Notify<'_>,
 ) -> Result<History, String> {
-    let f = state.steam.market_history(hash, cookie, notify).await?;
+    let f = state.steam.market_history(hash, None, notify).await?;
     if f.status == 429 {
         return Ok(History::Refused);
     }
@@ -399,10 +416,12 @@ async fn fetch_history(
         .filter(|_| f.is_success())
         .and_then(market::parse_history);
     if parsed.is_none() {
-        if let Some(c) = cookie {
+        if let Some(c) = cookie.filter(|_| !state.steam.is_blocked(Bucket::Market, true)) {
             let f = state.steam.market_history_old(hash, c, notify).await?;
+            // A refusal here is the signed-in route's own; the item is tried
+            // again later and the read carries on without sign-in.
             if f.status == 429 {
-                return Ok(History::Refused);
+                return Ok(History::Unreadable);
             }
             parsed = f
                 .json()
@@ -496,9 +515,9 @@ pub async fn item_history(
                 let quiet = |_: String| {};
                 restore_market(state);
                 let outcome = fetch_history(state, hash, cookie, &quiet).await;
-                save_market(state, cookie.is_some());
+                save_market(state);
                 match outcome? {
-                    History::Refused => return Err(slow_down_text(state, cookie.is_some())),
+                    History::Refused => return Err(slow_down_text(state, false)),
                     History::Unreadable => return Err(
                         "Steam's price history for this item couldn't be read. Try again later."
                             .to_string(),
@@ -622,7 +641,7 @@ pub async fn game_books(
         }
     }
     if total > 0 {
-        save_market(state, signed_in);
+        save_market(state);
         progress(BookProgress {
             appid,
             done: total,

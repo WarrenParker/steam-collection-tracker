@@ -16,6 +16,12 @@ All notable changes to Steam Collection Tracker are listed here, newest first. T
 
 - Clicking an item in a game's details opens its panel, which has the price details that used to open below the item.
 
+### Fixed
+
+- **Price history reads again.** Steam stopped answering the app's price history requests while signed in, yet answered the same request without sign-in, so it seems to limit price history per account. Price history is now read without sign-in, which Steam allows; the older signed-in route is only tried when an answer can't be read.
+- A Market pace slowed by refusals speeds back up step by step after 50 answers in a row, until it's back to about 480 requests an hour.
+- Waits after refusals are kept apart for signed-in and anonymous requests.
+
 ## [0.6.3] - 2026-10-22
 
 ### Changed

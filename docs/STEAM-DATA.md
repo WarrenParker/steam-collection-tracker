@@ -36,6 +36,7 @@ What the app reads from Steam, where it comes from, and what each connection tes
 - Version 0.1.0 retried refused Community requests, which made a test take nearly 3 minutes. Version 0.2.0 fixed that.
 - **Market, Oct 22, 2026.** A long price read was refused (429) after a steady 15 Market requests a minute: 885 in the last hour and 1,520 over two hours, all paced 4 seconds apart. Steam doesn't publish the limit. From 0.6.2, long reads are held to about 480 an hour.
 - **Market, Oct 22, 2026, later.** At 0.6.2's pace, the Market was refused again after about 400 requests in 35 minutes, following about 1,540 in the two hours before (1,950 that afternoon: every game's prices, then 1,346 order books). One retry every 30 minutes was then refused for at least 1.5 hours, so the limit seems to cover several hours and asking during a refusal may extend it. From 0.6.3, waits double after refusals in a row, and order books are read only when a game is opened.
+- **Price history, signed in vs not, Oct 22, 2026.** The 1,346 order books (signed in) all answered. The first price history request after them (`/market/actions?q=QueryPriceHistory`, signed in) was refused, and so was one retry every 30 minutes for two hours. At the same time the same request from a browser on the same connection, not signed in, answered 200 with the whole history (161 KB). So the connection wasn't blocked, and Steam seems to limit signed-in price history per account. From 0.7.0 the app reads price history without sign-in.
 
 ## Formats worth knowing
 
