@@ -3,14 +3,20 @@
 //!
 //! 5. **Market prices:** each game's items on the Market, ten per request,
 //!    with the cheapest listing. Read again when older than a day.
-//! 6. **Order books and price history:** the order book of every card that
-//!    still needs two or more copies (so the cost walks up the listings), then
-//!    each item's price history. A history is read once and then again about
-//!    a month later, staggered so only a few items fall due each day.
+//! 6. **Price history:** each item's price history, items that change cost
+//!    to complete first, then items the user owns, then the rest. A history
+//!    is read once and then again about a month later, staggered so only a
+//!    few items fall due each day.
+//!
+//! Order books, for cards that still need two or more copies (so the cost
+//! walks up the listings), are read when the user opens a game rather than
+//! during scans: there are over a thousand of them on a large account.
 //!
 //! Exchange rates come from api.frankfurter.dev, once a day, and only when
 //! prices are shown in a currency other than the one Steam answers in.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -21,7 +27,7 @@ use crate::db::{self, HistorySave};
 use crate::market::{self, series};
 use crate::scan::{Ctx, RunEnd};
 use crate::state::AppState;
-use crate::steam::{Bucket, Notify, BLOCK_MINUTES};
+use crate::steam::{Bucket, Notify};
 
 const HOUR: i64 = 3600;
 const DAY: i64 = 24 * HOUR;
@@ -48,6 +54,10 @@ const META_CURRENCY: &str = market::META_CURRENCY;
 const META_CURRENCY_AT: &str = "market_currency_at";
 /// The Market pace, kept slower after Steam refused a long read.
 const META_MARKET_PERIOD: &str = "market_period_ms";
+/// Market refusals in a row, and when the app may ask again (Unix time),
+/// kept so a restart doesn't ask too soon.
+const META_MARKET_REFUSALS: &str = "market_refusals";
+const META_MARKET_BLOCKED_UNTIL: &str = "market_blocked_until";
 /// Something always on the Market, used to learn which currency Steam answers in.
 const PROBE_ITEM: &str = "753-Sack of Gems";
 const RATES_URL: &str = "https://api.frankfurter.dev/v2/rates";
@@ -78,16 +88,66 @@ fn next_due(hash_name: &str, now: i64) -> i64 {
     now + (HISTORY_DAYS + spread) * DAY
 }
 
-fn waiting() -> RunEnd {
-    RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60)
+/// Carries on once the Market is allowed again.
+fn waiting(state: &AppState, signed_in: bool) -> RunEnd {
+    let wait = state.steam.wait_seconds(Bucket::Market, signed_in).max(60);
+    RunEnd::Waiting(db::now() + wait as i64)
 }
 
-/// Saves the Market pace, which a refusal slows down, for the next run.
-fn save_pace(state: &AppState) {
+/// The message when Steam is refusing the Market right now.
+fn slow_down_text(state: &AppState, signed_in: bool) -> String {
+    let wait = state.steam.wait_seconds(Bucket::Market, signed_in).max(60);
+    format!(
+        "Steam asked the app to slow down. Try again in about {}.",
+        crate::scan::duration_text(wait)
+    )
+}
+
+static MARKET_RESTORED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Restores the Market pace, refusals in a row and any wait still running,
+/// once per app start.
+fn restore_market(state: &AppState) {
+    if MARKET_RESTORED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let meta = |key: &str| -> Option<i64> {
+        state
+            .db
+            .read(|c| db::get_meta(c, key))
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+    };
+    if let Some(ms) = meta(META_MARKET_PERIOD) {
+        state.steam.set_market_period_ms(ms.max(0) as u64);
+    }
+    let refusals = meta(META_MARKET_REFUSALS).unwrap_or(0).clamp(0, 100) as u32;
+    let left = meta(META_MARKET_BLOCKED_UNTIL).map_or(0, |t| (t - db::now()).max(0) as u64);
+    if refusals > 0 || left > 0 {
+        state.steam.restore_block(Bucket::Market, refusals, left);
+    }
+}
+
+/// Seconds per Market request on long reads at the current pace, which is
+/// slower after refusals.
+pub fn seconds_per_request(state: &AppState) -> f64 {
+    restore_market(state);
+    (state.steam.market_period_ms() as f64 / 1000.0).max(SECONDS_PER_REQUEST)
+}
+
+/// Saves the Market pace, refusals in a row and any wait, for the next run
+/// and the next app start.
+fn save_market(state: &AppState, signed_in: bool) {
     let ms = state.steam.market_period_ms().to_string();
-    let _ = state
-        .db
-        .write(|tx| db::set_meta(tx, META_MARKET_PERIOD, &ms));
+    let refusals = state.steam.refusals(Bucket::Market).to_string();
+    let wait = state.steam.wait_seconds(Bucket::Market, signed_in);
+    let until = (if wait > 0 { db::now() + wait as i64 } else { 0 }).to_string();
+    let _ = state.db.write(|tx| {
+        db::set_meta(tx, META_MARKET_PERIOD, &ms)?;
+        db::set_meta(tx, META_MARKET_REFUSALS, &refusals)?;
+        db::set_meta(tx, META_MARKET_BLOCKED_UNTIL, &until)
+    });
 }
 
 /// Stages 5 and 6.
@@ -98,17 +158,9 @@ pub(crate) async fn stages(
     cookie: Option<&str>,
 ) -> Result<RunEnd, String> {
     let state = ctx.state;
-    let data = &state.db;
-    if let Some(ms) = data
-        .read(|c| db::get_meta(c, META_MARKET_PERIOD))?
-        .and_then(|v| v.parse::<u64>().ok())
-    {
-        state.steam.set_market_period_ms(ms);
-    }
+    restore_market(state);
     let outcome = run_stages(ctx, family_on, resume, cookie).await;
-    if matches!(outcome, Ok(RunEnd::Waiting(_))) {
-        save_pace(state);
-    }
+    save_market(state, cookie.is_some());
     outcome
 }
 
@@ -132,7 +184,7 @@ async fn run_stages(
         ctx.stage(5, "Checking Market prices…", 0);
         let f = state.steam.market_book(PROBE_ITEM, cookie, notify).await?;
         if f.status == 429 {
-            return Ok(waiting());
+            return Ok(waiting(state, signed_in));
         }
         if let Some(b) = f.json().as_ref().and_then(market::parse_book) {
             remember_currency(state, b.currency);
@@ -163,7 +215,7 @@ async fn run_stages(
             return Ok(RunEnd::Paused);
         }
         if state.steam.is_blocked(Bucket::Market, signed_in) {
-            return Ok(waiting());
+            return Ok(waiting(state, signed_in));
         }
         let started = db::now();
         let expected = data
@@ -180,7 +232,7 @@ async fn run_stages(
                 .await?;
             timer.add(t);
             if f.status == 429 {
-                return Ok(waiting());
+                return Ok(waiting(state, signed_in));
             }
             let Some(page) = f
                 .json()
@@ -215,30 +267,35 @@ async fn run_stages(
         ctx.progress(i as u64 + 1, Some(timer.estimate(pages_left, period())));
     }
 
-    // Stage 6: order books for cards that still need several copies, then
-    // price histories that are missing or due.
+    // Stage 6: price histories that are missing or due. Items that change
+    // cost to complete come first (their usual price decides whether an
+    // outlying listing counts), then items the user owns (value), then the
+    // rest. New histories come before monthly refreshes.
     let now = db::now();
     let rules = completion::Rules::from_settings(&state.settings());
     let snap = state.snapshot(rules)?;
-    let books: Vec<String> = snap
-        .items
-        .iter()
-        .filter(|i| {
-            i.counted
-                && i.group == Group::Cards
-                && i.needed.saturating_sub(i.have) >= 2
-                && snap
-                    .games
-                    .get(&i.appid)
-                    .is_some_and(|g| g.counts_for_account)
-        })
-        .filter_map(|i| i.price.as_ref())
-        .filter(|p| p.on_market && p.book_at.is_none_or(|t| now - t > BOOK_STALE_DAYS * DAY))
-        .map(|p| p.hash_name.clone())
-        .collect();
+    let mut rank: HashMap<&str, u8> = HashMap::new();
+    for i in &snap.items {
+        let Some(p) = i.price.as_ref() else { continue };
+        let counts = snap
+            .games
+            .get(&i.appid)
+            .is_some_and(|g| g.counts_for_account);
+        let r = if i.counted && counts && i.have < i.needed {
+            0
+        } else if i.held > 0 {
+            1
+        } else {
+            2
+        };
+        let e = rank.entry(p.hash_name.as_str()).or_insert(r);
+        *e = (*e).min(r);
+    }
+    let mut histories = data.read(|c| db::history_targets(c, family_on, now))?;
+    histories.sort_by_key(|(hash, read)| (*read, rank.get(hash.as_str()).copied().unwrap_or(2)));
+    drop(rank);
     drop(snap);
-    let histories = data.read(|c| db::history_targets(c, family_on, now))?;
-    let total = (books.len() + histories.len()) as u64;
+    let total = histories.len() as u64;
     if total == 0 {
         return Ok(RunEnd::Done { seconds: 0 });
     }
@@ -247,47 +304,21 @@ async fn run_stages(
         return Ok(RunEnd::NeedsPriceConfirm { items: total });
     }
 
-    ctx.stage(6, "Reading order books…", total);
+    ctx.stage(6, "Reading price history…", total);
     let timer = Timer::new();
     let mut done = 0u64;
-    for hash in &books {
+    for (hash, _) in &histories {
         if ctx.pause_requested() {
             return Ok(RunEnd::Paused);
         }
         if state.steam.is_blocked(Bucket::Market, signed_in) {
-            return Ok(waiting());
-        }
-        let t = Instant::now();
-        let f = state.steam.market_book(hash, cookie, notify).await?;
-        timer.add(t);
-        if f.status == 429 {
-            return Ok(waiting());
-        }
-        if let Some(b) = f
-            .json()
-            .as_ref()
-            .filter(|_| f.is_success())
-            .and_then(market::parse_book)
-        {
-            data.write(|tx| db::save_book(tx, hash, &b, db::now()))?;
-        }
-        done += 1;
-        ctx.progress(done, Some(timer.estimate(total - done, period())));
-    }
-
-    ctx.label("Reading price history…");
-    for hash in &histories {
-        if ctx.pause_requested() {
-            return Ok(RunEnd::Paused);
-        }
-        if state.steam.is_blocked(Bucket::Market, signed_in) {
-            return Ok(waiting());
+            return Ok(waiting(state, signed_in));
         }
         let t = Instant::now();
         let outcome = fetch_history(state, hash, cookie, notify).await?;
         timer.add(t);
         match outcome {
-            History::Refused => return Ok(waiting()),
+            History::Refused => return Ok(waiting(state, signed_in)),
             History::Read(h) => save_history(state, hash, &h)?,
             History::Unreadable => {
                 data.write(|tx| db::postpone_history(tx, hash, db::now() + RETRY_DAYS * DAY))?
@@ -463,12 +494,11 @@ pub async fn item_history(
                     return Err("That item isn't on the Market.".to_string());
                 }
                 let quiet = |_: String| {};
-                match fetch_history(state, hash, cookie, &quiet).await? {
-                    History::Refused => {
-                        return Err(format!(
-                    "Steam asked the app to slow down. Try again in about {BLOCK_MINUTES} minutes."
-                ))
-                    }
+                restore_market(state);
+                let outcome = fetch_history(state, hash, cookie, &quiet).await;
+                save_market(state, cookie.is_some());
+                match outcome? {
+                    History::Refused => return Err(slow_down_text(state, cookie.is_some())),
                     History::Unreadable => return Err(
                         "Steam's price history for this item couldn't be read. Try again later."
                             .to_string(),
@@ -510,6 +540,96 @@ pub async fn item_history(
             .to_string(),
         read_at: Some(db::now()),
     })
+}
+
+// ---- Order books ----------------------------------------------------------------------
+
+/// One game's order books are read at a time, so opening several games
+/// doesn't send their requests side by side.
+static BOOKS: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+#[derive(Serialize, Clone, Debug)]
+pub struct BookProgress {
+    pub appid: u64,
+    pub done: u64,
+    pub total: u64,
+}
+
+/// Reads the order books of a game's cards that still need two or more
+/// copies, when the user opens the game, so its cost to complete walks up
+/// the listings. Books read in the last six days are kept. `progress` is
+/// called before each request. Returns how many books were read.
+pub async fn game_books(
+    state: &AppState,
+    appid: u64,
+    cookie: Option<&str>,
+    progress: &(dyn Fn(BookProgress) + Send + Sync),
+) -> Result<u64, String> {
+    let _one_at_a_time = BOOKS.lock().await;
+    restore_market(state);
+    let now = db::now();
+    let rules = completion::Rules::from_settings(&state.settings());
+    let books: Vec<String> = state
+        .snapshot(rules)?
+        .items
+        .iter()
+        .filter(|i| {
+            i.appid == appid
+                && i.counted
+                && i.group == Group::Cards
+                && i.needed.saturating_sub(i.have) >= 2
+        })
+        .filter_map(|i| i.price.as_ref())
+        .filter(|p| p.on_market && p.book_at.is_none_or(|t| now - t > BOOK_STALE_DAYS * DAY))
+        .map(|p| p.hash_name.clone())
+        .collect();
+    let signed_in = cookie.is_some();
+    let total = books.len() as u64;
+    let quiet = |_: String| {};
+    let mut read = 0u64;
+    let mut outcome = Ok(());
+    for (i, hash) in books.iter().enumerate() {
+        progress(BookProgress {
+            appid,
+            done: i as u64,
+            total,
+        });
+        if state.steam.is_blocked(Bucket::Market, signed_in) {
+            outcome = Err(slow_down_text(state, signed_in));
+            break;
+        }
+        let f = match state.steam.market_book(hash, cookie, &quiet).await {
+            Ok(f) => f,
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
+        };
+        if f.status == 429 {
+            outcome = Err(slow_down_text(state, signed_in));
+            break;
+        }
+        if let Some(b) = f
+            .json()
+            .as_ref()
+            .filter(|_| f.is_success())
+            .and_then(market::parse_book)
+        {
+            state
+                .db
+                .write(|tx| db::save_book(tx, hash, &b, db::now()))?;
+            read += 1;
+        }
+    }
+    if total > 0 {
+        save_market(state, signed_in);
+        progress(BookProgress {
+            appid,
+            done: total,
+            total,
+        });
+    }
+    outcome.map(|()| read)
 }
 
 // ---- Exchange rates -------------------------------------------------------------------

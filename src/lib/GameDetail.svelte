@@ -4,7 +4,9 @@
     api,
     errorText,
     links,
+    on,
     type Availability,
+    type BookProgress,
     type GameDetail,
     type GameRow,
     type Group,
@@ -39,6 +41,10 @@
   let error = $state('');
   let saving = $state<string | null>(null);
   let open = $state<string | null>(null);
+  // Reading the Market's listings for cards that need several copies.
+  let books = $state<BookProgress | null>(null);
+  let booksNote = $state('');
+  let booksRead = false;
 
   const done = $derived(detail?.completion ?? null);
   const cur = $derived(detail?.currency ?? 'USD');
@@ -65,7 +71,41 @@
     )[group];
   }
 
-  onMount(load);
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
+    let gone = false;
+    (async () => {
+      const stop = await on<BookProgress>('book-progress', (p) => {
+        if (p.appid !== game.appid) return;
+        if (p.total > 0) booksRead = true;
+        books = p.done < p.total ? p : null;
+      });
+      if (gone) stop();
+      else unlisten = stop;
+      await load();
+      if (!gone && !error) readBooks();
+    })();
+    return () => {
+      gone = true;
+      unlisten?.();
+    };
+  });
+
+  /** Reads the order books this game's cost needs, then shows the updated cost. */
+  async function readBooks() {
+    let read = false;
+    try {
+      const updated = await api.readGameBooks(game.appid);
+      read = true;
+      detail = updated;
+    } catch (e) {
+      booksNote = errorText(e);
+      await load();
+    } finally {
+      books = null;
+    }
+    if (read && booksRead) onchange();
+  }
 
   async function load() {
     try {
@@ -202,6 +242,14 @@
             </li>
           {/each}
         </ul>
+      {/if}
+
+      {#if books}
+        <p class="desc detail-note" aria-live="polite">
+          Reading the Market's listings for this game's cards: {num(books.done)} of {num(books.total)}…
+        </p>
+      {:else if booksNote}
+        <p class="desc detail-note">{booksNote}</p>
       {/if}
 
       {#if prices && prices.alt_items > 0}

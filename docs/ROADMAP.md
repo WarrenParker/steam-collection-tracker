@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.6.2. Phase 3 is done; Phase 4 is next.
+**Now:** version 0.6.3. Phase 3 is done; Phase 4 is in progress.
 
 ## Goal
 
@@ -48,6 +48,7 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Account value before market fees, with items that can't be sold shown as a points value. [0.6.0](../CHANGELOG.md#060---2026-10-22)
 - ✅ Cost to complete, with money and points shown separately, the order book for cards that need several copies, and listings far above an item's usual price counted at its usual price. [0.6.1](../CHANGELOG.md#061---2026-10-22)
 - ✅ Long Market reads paced to stay under the rate Steam refuses. [0.6.2](../CHANGELOG.md#062---2026-10-22)
+- ✅ Longer waits after refusals in a row, price history read most useful first, and order books read when a game is opened. [0.6.3](../CHANGELOG.md#063---2026-10-22)
 
 ## Phase 4: Interface
 

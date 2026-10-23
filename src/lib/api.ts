@@ -363,6 +363,7 @@ export const api = {
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),
+  readGameBooks: (appid: number) => invoke<GameDetail>('read_game_books', { appid }),
   priceHistory: (hashName: string, full = false) =>
     invoke<PriceHistory>('get_price_history', { hashName, full }),
   updatePriceSettings: (patch: {
@@ -384,6 +385,13 @@ export const api = {
   signIn: () => invoke<SignInResult>('sign_in'),
   signOut: () => invoke<SettingsView>('sign_out'),
 };
+
+/** Progress reading a game's order books, sent as "book-progress". */
+export interface BookProgress {
+  appid: number;
+  done: number;
+  total: number;
+}
 
 export function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   return listen<T>(event, (e) => handler(e.payload));

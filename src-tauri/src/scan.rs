@@ -297,14 +297,15 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
             Some(format!(
                 "Prices are read. Reading the price history of {} items takes {}, one request every few seconds. You can keep using the app while it runs, and pause it anytime.",
                 items,
-                duration_text((items as f64 * crate::prices::SECONDS_PER_REQUEST).ceil() as u64)
+                duration_text((items as f64 * crate::prices::seconds_per_request(&state)).ceil() as u64)
             )),
             None,
         ),
         Ok(RunEnd::Waiting(at)) => (
             ScanState::Waiting,
             Some(format!(
-                "Steam asked the app to slow down, so the scan is taking a {BLOCK_MINUTES}-minute break. It carries on by itself if the app stays open."
+                "Steam asked the app to slow down, so the scan is taking a break for {}. It carries on by itself if the app stays open.",
+                duration_text((at - db::now()).max(60) as u64)
             )),
             Some(at),
         ),
@@ -369,8 +370,8 @@ fn price_backlog(state: &AppState) -> (u64, Option<u64>) {
         .db
         .read(|c| db::history_missing(c, family, db::now()))
         .unwrap_or(0);
-    let seconds =
-        (missing > 0).then(|| (missing as f64 * crate::prices::SECONDS_PER_REQUEST).ceil() as u64);
+    let seconds = (missing > 0)
+        .then(|| (missing as f64 * crate::prices::seconds_per_request(state)).ceil() as u64);
     (missing, seconds)
 }
 
@@ -824,14 +825,14 @@ async fn catalog_stages(
         }
         let game_started = Instant::now();
         if state.steam.is_blocked(Bucket::Community, false) {
-            return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
+            return Ok(community_waiting(state));
         }
         let f = state
             .steam
             .card_page(steam_id, target.appid, notify)
             .await?;
         if f.status == 429 {
-            return Ok(RunEnd::Waiting(db::now() + BLOCK_MINUTES as i64 * 60));
+            return Ok(community_waiting(state));
         }
         if f.is_success() {
             let page = cardpage::parse(&f.body);
@@ -971,7 +972,13 @@ pub fn import_legacy_summary(paths: &AppPaths, state: &AppState) {
     let _ = std::fs::remove_dir(paths.root.join("cache"));
 }
 
-fn duration_text(seconds: u64) -> String {
+/// Waits for as long as Steam's card pages are held back.
+fn community_waiting(state: &AppState) -> RunEnd {
+    let wait = state.steam.wait_seconds(Bucket::Community, false).max(60);
+    RunEnd::Waiting(db::now() + wait as i64)
+}
+
+pub(crate) fn duration_text(seconds: u64) -> String {
     let plural = |n: u64, word: &str| {
         if n == 1 {
             format!("1 {word}")
@@ -1149,7 +1156,7 @@ pub async fn read_inventory(
     } else if errors.iter().all(|e| matches!(e, PageError::Refused)) {
         (
             Some(format!(
-                "Steam is limiting inventory requests from your connection right now, even signed in. The app will wait {BLOCK_MINUTES} minutes before asking again."
+                "Steam is limiting inventory requests from your connection right now, even signed in. The app will wait at least {BLOCK_MINUTES} minutes before asking again, and longer if Steam keeps refusing."
             )),
             false,
         )

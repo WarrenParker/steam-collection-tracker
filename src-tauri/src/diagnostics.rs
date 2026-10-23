@@ -21,7 +21,7 @@ use crate::session::{self, Session};
 use crate::state::AppState;
 use crate::steam::{
     community_url, inventory, parse_badges, parse_owned_games, parse_player_summary, webapi_url,
-    Auth, Bucket, Fetched, Notify, BLOCK_MINUTES,
+    Auth, Bucket, Fetched, Notify,
 };
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,7 +137,7 @@ impl Run<'_> {
 
 fn skipped_text() -> String {
     format!(
-        "Skipped: Steam refused this kind of request in the last {BLOCK_MINUTES} minutes, and asking again could make the block longer."
+        "Skipped: Steam refused this kind of request recently, and asking again could make the block longer."
     )
 }
 
