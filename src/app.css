@@ -35,6 +35,9 @@
   --warn: #e0b25a;
   --bad: #e8806f;
   --scrim: rgba(0, 0, 0, 0.45);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.45);
+  --glow: transparent;
 }
 
 :root[data-theme='dark'] {
@@ -57,6 +60,9 @@
   --warn: #e3b45c;
   --bad: #ef7f72;
   --scrim: rgba(0, 0, 0, 0.55);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --glow: radial-gradient(1200px 420px at 85% -10%, rgba(142, 170, 255, 0.07), transparent 70%);
 }
 
 :root[data-theme='light'] {
@@ -80,6 +86,9 @@
   --warn: #9a6400;
   --bad: #bf3b2b;
   --scrim: rgba(20, 20, 20, 0.25);
+  --shadow: 0 6px 18px rgba(30, 30, 25, 0.1);
+  --shadow-l: 0 20px 52px rgba(30, 30, 25, 0.18);
+  --glow: radial-gradient(1200px 420px at 85% -10%, rgba(48, 73, 196, 0.05), transparent 70%);
 }
 
 /* Base */
@@ -421,6 +430,7 @@ input:focus {
 .content {
   flex: 1;
   overflow: auto;
+  background: var(--glow);
 }
 
 .fatal {
@@ -723,6 +733,7 @@ input:focus {
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-l);
   animation: slide-in 0.18s ease-out;
 }
 
@@ -1583,7 +1594,10 @@ input:focus {
 }
 
 .thumb.foil-edge {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px #c8b8f0;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--sunken), var(--sunken)) padding-box,
+    var(--foil) border-box;
 }
 
 .item-name {
@@ -1989,7 +2003,7 @@ kbd {
   background: var(--raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-l);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-l);
 }
 
 .check-row {
@@ -2310,7 +2324,7 @@ kbd {
   background: var(--raised);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-l);
   animation: pop-in 0.14s ease-out;
 }
 
@@ -2575,7 +2589,7 @@ button.dash-card {
 button.dash-card:hover {
   border-color: var(--line-strong);
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow);
 }
 
 .dash-card.hero {
