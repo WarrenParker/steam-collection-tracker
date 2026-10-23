@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.8.0. Phase 4 is in progress.
+**Now:** version 0.8.1. Phase 4 is in progress.
 
 ## Goal
 
