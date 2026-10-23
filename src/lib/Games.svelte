@@ -2,9 +2,7 @@
   import { onMount } from 'svelte';
   import { api, errorText, on, type GameRow, type ScanStatus } from './api';
   import { money, num, pct } from './format';
-  import GameDetail from './GameDetail.svelte';
-
-  let { steamId }: { steamId: string | null } = $props();
+  import { nav } from './nav.svelte.ts';
 
   type Filter = 'all' | 'owned' | 'unowned' | 'family' | 'items' | 'cards' | 'complete';
   type SortKey = 'name' | 'complete' | 'cards' | 'items' | 'yours' | 'value' | 'cost' | 'badge' | 'achievements';
@@ -26,7 +24,6 @@
   let filter = $state<Filter>('all');
   let sortKey = $state<SortKey>('name');
   let descending = $state(false);
-  let selected = $state<GameRow | null>(null);
 
   const counts = $derived({
     all: games.length,
@@ -132,10 +129,19 @@
     return descending ? 'descending' : 'ascending';
   }
 
-  // Completion changes when an item's availability is set by hand.
+  // Completion changes when an item's availability is set by hand, or a
+  // game's order books are read.
+  let seenVersion = nav.dataVersion;
+  $effect(() => {
+    if (nav.dataVersion !== seenVersion) {
+      seenVersion = nav.dataVersion;
+      refresh();
+    }
+  });
+
   async function refresh() {
     await load();
-    if (selected) selected = games.find((g) => g.appid === selected!.appid) ?? selected;
+    if (nav.game) nav.game = games.find((g) => g.appid === nav.game!.appid) ?? nav.game;
   }
 </script>
 
@@ -228,7 +234,7 @@
         {#each shown as g (g.appid)}
           <tr>
             <td>
-              <button class="game-name" onclick={() => (selected = g)} title="Show this game's items">{g.name}</button>
+              <button class="game-name" onclick={() => (nav.game = g)} title="Show this game's items">{g.name}</button>
               {#if !g.owned && g.family}<span class="tag">Family</span>{/if}
               {#if !g.owned && !g.family}<span class="tag">{g.event ? 'Event' : 'Unowned'}</span>{/if}
               {#if g.has_cards && !g.cataloged}<span class="tag quiet" title="Its item list is read in the next scan">Not scanned</span>{/if}
@@ -268,6 +274,3 @@
   {/if}
 </div>
 
-{#if selected}
-  <GameDetail game={selected} {steamId} onclose={() => (selected = null)} onchange={refresh} />
-{/if}

@@ -180,6 +180,51 @@ export interface ItemView {
   unpriced: boolean;
 }
 
+/** One row of the all-items list. Prices are in mills. */
+export interface ItemRow {
+  key: string;
+  appid: number;
+  group: Group;
+  kind: string;
+  foil: boolean;
+  name: string;
+  image: string | null;
+  held: number;
+  have: number;
+  needed: number;
+  counted: boolean;
+  availability: Availability;
+  tags: string[];
+  on_market: boolean;
+  price: number | null;
+  average: number | null;
+  change: number | null;
+  points_cost: number | null;
+  value: number | null;
+  cost: number | null;
+  cost_points: number | null;
+}
+
+export interface GameName {
+  appid: number;
+  name: string;
+  owned: boolean;
+  family: boolean;
+  event: boolean;
+}
+
+export interface ItemsView {
+  items: ItemRow[];
+  games: GameName[];
+  currency: string;
+}
+
+export interface ItemDetail {
+  item: ItemView;
+  game_name: string | null;
+  currency: string;
+}
+
 /** Prices are in mills: thousandths of the shown currency's main unit. */
 export interface ItemPrice {
   hash_name: string;
@@ -361,6 +406,8 @@ export const api = {
   games: () => invoke<GameRow[]>('get_games'),
   completion: () => invoke<AccountCompletion>('get_completion'),
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
+  items: () => invoke<ItemsView>('get_items'),
+  item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),
   readGameBooks: (appid: number) => invoke<GameDetail>('read_game_books', { appid }),
@@ -409,6 +456,7 @@ export const links = {
   store: (appid: number) => `https://store.steampowered.com/app/${appid}/`,
   cards: (steamId: string, appid: number) =>
     `https://steamcommunity.com/profiles/${steamId}/gamecards/${appid}/`,
+  pointsShop: (appid: number) => `https://store.steampowered.com/points/shop/app/${appid}`,
   market: (hashName: string) =>
     `https://steamcommunity.com/market/listings/753/${encodeURIComponent(hashName)}`,
 };

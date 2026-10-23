@@ -1,3 +1,5 @@
+import type { Group } from './api';
+
 const numbers = new Intl.NumberFormat('en-US');
 
 export function num(n: number): string {
@@ -66,6 +68,27 @@ export function owned(n: number): string {
 }
 
 const moneyFormats = new Map<string, Intl.NumberFormat>();
+
+/** The kinds of item, in the order lists show them. */
+export const GROUP_ORDER: Group[] = ['cards', 'foil_cards', 'emoticons', 'backgrounds', 'points_shop', 'boosters'];
+
+export const GROUP_LABELS: Record<Group, string> = {
+  cards: 'Cards',
+  foil_cards: 'Foil cards',
+  emoticons: 'Emoticons',
+  backgrounds: 'Backgrounds',
+  points_shop: 'Points Shop items',
+  boosters: 'Booster packs',
+};
+
+/** How much of an item the user has: "3 of 5", "2 owned", "Owned", "Complete" or "". */
+export function holding(i: { have: number; needed: number; held: number }): string {
+  if (i.needed > 1) return `${i.have} of ${i.needed}`;
+  if (i.held > 1) return `${num(i.held)} owned`;
+  if (i.held > 0) return 'Owned';
+  // A foil card counts through the foil badge too.
+  return i.have >= i.needed ? 'Complete' : '';
+}
 
 /** Money from mills (thousandths of the main unit), like "$12.34". */
 export function money(mills: number | null | undefined, currency: string): string {

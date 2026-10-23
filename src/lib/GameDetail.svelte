@@ -12,9 +12,9 @@
     type Group,
     type ItemView,
   } from './api';
-  import { change, money, num, owned, pct, points } from './format';
+  import { change, holding, money, num, owned, pct, points } from './format';
   import Icon from './Icon.svelte';
-  import PricePanel from './PricePanel.svelte';
+  import { nav, openItem } from './nav.svelte.ts';
 
   let {
     game,
@@ -40,7 +40,8 @@
   let detail = $state<GameDetail | null>(null);
   let error = $state('');
   let saving = $state<string | null>(null);
-  let open = $state<string | null>(null);
+  // Items as a list with prices, or as a grid of their art.
+  let layout = $state<'list' | 'grid'>(savedLayout());
   // Reading the Market's listings for cards that need several copies.
   let books = $state<BookProgress | null>(null);
   let booksNote = $state('');
@@ -70,6 +71,15 @@
       } as const
     )[group];
   }
+
+  // Read again when something it shows was saved elsewhere, like an item's availability.
+  let seenVersion = nav.dataVersion;
+  $effect(() => {
+    if (nav.dataVersion !== seenVersion) {
+      seenVersion = nav.dataVersion;
+      load();
+    }
+  });
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
@@ -132,10 +142,21 @@
     }
   }
 
-  function status(item: ItemView): string {
-    if (item.needed > 1) return `${item.have} of ${item.needed}`;
-    if (item.held > 1) return `${num(item.held)} owned`;
-    return item.held > 0 ? 'Owned' : '';
+  function savedLayout(): 'list' | 'grid' {
+    try {
+      return localStorage.getItem('game-items-layout') === 'grid' ? 'grid' : 'list';
+    } catch {
+      return 'list';
+    }
+  }
+
+  function setLayout(l: 'list' | 'grid') {
+    layout = l;
+    try {
+      localStorage.setItem('game-items-layout', l);
+    } catch {
+      // Remembering the choice is only a convenience.
+    }
   }
 
   function statusTitle(item: ItemView): string {
@@ -151,19 +172,14 @@
     if (!p) return item.points_cost !== null ? 'Sold in the Points Shop' : 'Not on the Market';
     if (!p.on_market) return 'Not for sale on the Market right now';
     const avg = p.average !== null ? `, average ${money(p.average, cur)}` : '';
-    return `Cheapest of ${num(p.listings)} listed${avg}. Click for details.`;
+    return `Cheapest of ${num(p.listings)} listed${avg}.`;
   }
 
   function availabilityLabel(a: Availability): string {
     return AVAILABILITY.find((x) => x.value === a)?.label ?? a;
   }
 
-  function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose();
-  }
 </script>
-
-<svelte:window {onkeydown} />
 
 <div class="scrim" onclick={onclose} role="presentation"></div>
 <aside class="drawer wide" role="dialog" aria-modal="true" aria-label={game.name}>
@@ -281,74 +297,111 @@
         {/if}
       </div>
 
+      <div class="items-toolbar">
+        <h3>Items</h3>
+        <div class="segmented two" role="radiogroup" aria-label="Show items as">
+          <button role="radio" aria-checked={layout === 'list'} onclick={() => setLayout('list')} title="A list with prices">
+            <Icon name="list" size={14} /> List
+          </button>
+          <button role="radio" aria-checked={layout === 'grid'} onclick={() => setLayout('grid')} title="A grid of their art">
+            <Icon name="grid" size={14} /> Art
+          </button>
+        </div>
+      </div>
+
       {#each sections as s (s.group)}
         <section class="item-section">
           <h3>{s.label} <span class="count">{num(s.items.length)}</span></h3>
-          <ul class="items">
-            {#each s.items as item (item.key)}
-              <li class:has={item.have >= item.needed} class:out={!item.counted}>
-                <div class="thumb" class:foil-edge={item.foil}>
-                  {#if item.image}<img src={item.image} alt="" loading="lazy" />{/if}
-                </div>
-                <div class="item-main">
-                  <div class="item-name">{item.name}</div>
-                  <div class="item-sub">
-                    {#if item.points_cost !== null}<span>{num(item.points_cost)} points</span>{/if}
-                    {#each item.tags.filter((t) => !GAME_TAGS.has(t)) as t (t)}
-                      <span class="tag">{t}</span>
-                    {/each}
-                  </div>
-                  {#if item.note && (item.availability !== 'available' || item.tags.includes('Unverified') || item.overridden)}
-                    <div class="item-note">{item.note}</div>
-                  {/if}
-                </div>
-                <button
-                  class="price-cell"
-                  class:spike={item.tags.includes('Price spike')}
-                  class:dip={item.tags.includes('Price dip')}
-                  class:active={open === item.key}
-                  title={priceTitle(item)}
-                  aria-expanded={open === item.key}
-                  onclick={() => (open = open === item.key ? null : item.key)}
-                >
-                  {#if item.price?.on_market}
-                    <span>{money(item.price.lowest, cur)}</span>
-                    {#if item.price.change !== null}<span class="chg">{change(item.price.change)}</span>{/if}
-                  {:else if item.points_cost !== null && !item.marketable}
-                    <span>{num(item.points_cost)} pts</span>
-                  {:else}
-                    <span class="muted">–</span>
-                  {/if}
-                </button>
-                <div class="item-status" title={statusTitle(item)}>
-                  {#if item.have >= item.needed}<Icon name="check" size={14} />{/if}
-                  {status(item)}
-                </div>
-                {#if item.group !== 'boosters'}
-                  <select
-                    class="mini-select"
-                    aria-label="Availability of {item.name}"
-                    title={item.overridden ? 'Set by you' : 'Worked out by the app'}
-                    value={item.overridden ? item.availability : 'auto'}
-                    disabled={saving === item.key}
-                    onchange={(e) => setAvailability(item, (e.currentTarget as HTMLSelectElement).value)}
+          {#if layout === 'grid'}
+            <ul class="art-grid" class:wide-art={s.group === 'backgrounds'}>
+              {#each s.items as item (item.key)}
+                {@const complete = item.have >= item.needed}
+                <li>
+                  <button
+                    class="art-tile"
+                    class:complete
+                    class:missing={!complete && item.have === 0}
+                    class:partial={!complete && item.have > 0}
+                    class:foil={item.foil}
+                    class:out={!item.counted}
+                    onclick={() => openItem(item.key)}
+                    title="{item.name}{holding(item) ? ` · ${holding(item)}` : ' · Missing'}"
                   >
-                    <option value="auto">Auto: {availabilityLabel(item.auto_availability)}</option>
-                    {#each AVAILABILITY as a (a.value)}
-                      <option value={a.value}>{a.label}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <span></span>
-                {/if}
-              </li>
-              {#if open === item.key}
-                <li class="price-row">
-                  <PricePanel {item} currency={cur} onupdated={load} />
+                    <span class="art-img">
+                      {#if item.image}<img src={item.image} alt="" loading="lazy" />{/if}
+                    </span>
+                    {#if item.needed > 1}
+                      <span class="art-count">{item.have}/{item.needed}</span>
+                    {:else if complete}
+                      <span class="art-count"><Icon name="check" size={12} /></span>
+                    {/if}
+                    <span class="art-name">{item.name}</span>
+                  </button>
                 </li>
-              {/if}
-            {/each}
-          </ul>
+              {/each}
+            </ul>
+          {:else}
+            <ul class="items">
+              {#each s.items as item (item.key)}
+                <li class:has={item.have >= item.needed} class:out={!item.counted}>
+                  <div class="thumb" class:foil-edge={item.foil}>
+                    {#if item.image}<img src={item.image} alt="" loading="lazy" />{/if}
+                  </div>
+                  <div class="item-main">
+                    <button class="link-button item-name" onclick={() => openItem(item.key)} title="Show this item">
+                      {item.name}
+                    </button>
+                    <div class="item-sub">
+                      {#if item.points_cost !== null}<span>{num(item.points_cost)} points</span>{/if}
+                      {#each item.tags.filter((t) => !GAME_TAGS.has(t)) as t (t)}
+                        <span class="tag">{t}</span>
+                      {/each}
+                    </div>
+                    {#if item.note && (item.availability !== 'available' || item.tags.includes('Unverified') || item.overridden)}
+                      <div class="item-note">{item.note}</div>
+                    {/if}
+                  </div>
+                  <button
+                    class="price-cell"
+                    class:spike={item.tags.includes('Price spike')}
+                    class:dip={item.tags.includes('Price dip')}
+                    title={priceTitle(item)}
+                    onclick={() => openItem(item.key)}
+                  >
+                    {#if item.price?.on_market}
+                      <span>{money(item.price.lowest, cur)}</span>
+                      {#if item.price.change !== null}<span class="chg">{change(item.price.change)}</span>{/if}
+                    {:else if item.points_cost !== null && !item.marketable}
+                      <span>{num(item.points_cost)} pts</span>
+                    {:else}
+                      <span class="muted">–</span>
+                    {/if}
+                  </button>
+                  <div class="item-status" title={statusTitle(item)}>
+                    {#if item.have >= item.needed}<Icon name="check" size={14} />{/if}
+                    {holding(item)}
+                  </div>
+                  {#if item.group !== 'boosters'}
+                    <select
+                      class="mini-select"
+                      aria-label="Availability of {item.name}"
+                      title={item.overridden ? 'Set by you' : 'Worked out by the app'}
+                      value={item.overridden ? item.availability : 'auto'}
+                      disabled={saving === item.key}
+                      onchange={(e) => setAvailability(item, (e.currentTarget as HTMLSelectElement).value)}
+                    >
+                      <option value="auto">Auto: {availabilityLabel(item.auto_availability)}</option>
+                      {#each AVAILABILITY as a (a.value)}
+                        <option value={a.value}>{a.label}</option>
+                      {/each}
+                    </select>
+                  {:else}
+                    <span></span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </section>
       {/each}
     {/if}

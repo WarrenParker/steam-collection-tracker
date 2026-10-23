@@ -2,6 +2,20 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.7.0] - 2026-10-22
+
+### Added
+
+- **Items tab:** every item of every game in one list, with its art, game, kind, how much of it you have, today's price, the average price and tags. Sort by any column, filter by owned or missing, kind, availability, game, tags and price range, and search by item or game name. The list only draws the rows on screen, so tens of thousands of items scroll smoothly.
+- **Item panel:** click any item for its art, what you have, its tags and availability, its prices and chart, and buttons to open it on the Market, open the game's Points Shop or copy its name. With the panel open, the arrow keys step through the list.
+- **Search** with Ctrl+K or /: games and items by name. Arrow keys move, Enter opens.
+- **Art grid** in a game's details: every item's art, grouped by kind. Items you have are in full colour and missing ones greyed out, foils are edged with the foil sheen, and cards show their copies, like 3/5. Switch between List and Art, and the app remembers which.
+- Keyboard shortcuts: Esc closes the topmost panel. In an item's panel, M opens the Market, P the Points Shop and C copies the name.
+
+### Changed
+
+- Clicking an item in a game's details opens its panel, which has the price details that used to open below the item.
+
 ## [0.6.3] - 2026-10-22
 
 ### Changed

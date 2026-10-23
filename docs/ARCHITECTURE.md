@@ -20,6 +20,8 @@ index.html, src/              The interface
   App.svelte                  Top bar and tabs, setup vs main views, settings drawer
   app.css                     Design tokens and themes (greyscale, dark, light)
   lib/api.ts                  Typed calls into the engine
+  lib/nav.svelte.ts           What's on screen: the view and the panels open over it
+  lib/VirtualList.svelte      Draws only the rows in view, for long lists
   lib/*.svelte                Screens and components
 src-tauri/                    The engine
   tauri.conf.json             App name, bundle settings, content security policy

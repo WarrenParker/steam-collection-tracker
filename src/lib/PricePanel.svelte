@@ -7,10 +7,13 @@
     item,
     currency,
     onupdated,
+    marketLink = true,
   }: {
     item: ItemView;
     currency: string;
     onupdated: () => void;
+    /** False when the page around the panel already links to the Market. */
+    marketLink?: boolean;
   } = $props();
 
   const p = $derived(item.price);
@@ -145,9 +148,11 @@
       <button class="btn small" onclick={() => load(true)} disabled={loading || history?.full}>
         {history?.full ? 'Showing the full history' : loading ? 'Reading…' : 'Show full history'}
       </button>
-      <button class="btn small ghost" onclick={() => api.openLink(links.market(p.hash_name)).catch(() => {})}>
-        Market page
-      </button>
+      {#if marketLink}
+        <button class="btn small ghost" onclick={() => api.openLink(links.market(p.hash_name)).catch(() => {})}>
+          Market page
+        </button>
+      {/if}
       <span class="muted price-when">
         {history?.full ? 'Every sale since the first' : 'The last year'}{p.history_at
           ? ` · history read ${agoUnix(p.history_at)}`
