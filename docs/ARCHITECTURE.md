@@ -103,7 +103,7 @@ A scan runs in the background in six stages. Progress is saved as it goes, so a 
 
 Order books are read when the user opens a game, not during scans: one request per card that still needs two or more copies, which is over a thousand on a large account. Books read in the last 6 days are kept, and one game's books are read at a time.
 
-Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30, Market prices after 20 hours, and each price history about a month after it was read (23 to 37 days, spread by the item's name so a few fall due each day). A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page or Market requests, the scan stops, waits (30 minutes, longer after refusals in a row), and carries on by itself while the app is open. Only one copy of the app runs at a time; opening it again brings the existing window forward.
+Rescans only fetch what's missing or out of date: store details after 30 days, Points Shop items after 7, item catalogs after 30, Market prices after 20 hours, and each price history about a month after it was read (23 to 37 days, spread by the item's name so a few fall due each day). A first catalog expected to take more than 10 minutes waits for the user to continue it, with a time estimate. If Steam refuses card page or Market requests, the scan stops, waits (30 minutes, longer after refusals in a row), and carries on by itself while the app is open, or once the wait is over after the app opens again. Only one copy of the app runs at a time; opening it again brings the existing window forward.
 
 ## Completion
 

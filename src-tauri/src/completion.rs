@@ -665,7 +665,8 @@ pub fn compute(c: &Connection, rules: Rules, now: i64) -> rusqlite::Result<Snaps
     let mut entries: Vec<Entry> = Vec::new();
     {
         let mut st = c.prepare(
-            "SELECT appid, class, item_type, foil, name, title, COALESCE(image, image_large),
+            "SELECT appid, class, item_type, foil, name, title,
+                 CASE WHEN class = 4 THEN COALESCE(image_large, image) ELSE COALESCE(image, image_large) END,
                  animated, series, in_points, points_cost, points_active, points_from,
                  points_until, points_buyable
              FROM items WHERE class <> 1

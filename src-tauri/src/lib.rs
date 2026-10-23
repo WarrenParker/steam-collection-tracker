@@ -100,6 +100,7 @@ pub fn run() {
             });
 
             updater::spawn_startup_check(app.handle().clone());
+            scan::resume_after_restart(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

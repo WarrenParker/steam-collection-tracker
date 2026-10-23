@@ -448,7 +448,8 @@ input:focus {
 /* Overview */
 
 .page {
-  max-width: 1120px;
+  max-width: 1400px;
+  margin: 0 auto;
   padding: 28px 32px 48px;
 }
 
@@ -1402,6 +1403,7 @@ input:focus {
 .games .num {
   width: 96px;
   text-align: right;
+  white-space: nowrap;
 }
 
 .games .num.wide {
@@ -2558,7 +2560,7 @@ kbd {
 /* Dashboard */
 
 .page.dash {
-  max-width: 1240px;
+  max-width: 1400px;
 }
 
 .hero-cards {
@@ -2712,6 +2714,10 @@ button.dash-card:hover {
   background: var(--raised);
 }
 
+.dash-row.cost-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .dash-row.with-art {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   height: 44px;
@@ -2758,7 +2764,7 @@ button.dash-card:hover {
 }
 
 .typelist.compact li {
-  grid-template-columns: 150px 1fr 56px;
+  grid-template-columns: minmax(0, 200px) 1fr 56px;
   height: 28px;
 }
 

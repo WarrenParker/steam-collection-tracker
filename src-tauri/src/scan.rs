@@ -329,17 +329,48 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
     state.scan.running.store(false, Ordering::SeqCst);
 
     if let Some(at) = resume_at {
-        let handle = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let wait = (at - db::now()).max(1) as u64;
-            tokio::time::sleep(Duration::from_secs(wait)).await;
-            let state = handle.state::<AppState>();
-            let s = state.scan.status();
-            if s.state == ScanState::Waiting && s.resume_at == Some(at) {
-                start(&handle, true);
-            }
-        });
+        schedule_resume(app, at);
     }
+}
+
+/// Carries on a waiting scan at `at`, unless it was paused or restarted by then.
+fn schedule_resume(app: &AppHandle, at: i64) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let wait = (at - db::now()).max(1) as u64;
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+        let state = handle.state::<AppState>();
+        let s = state.scan.status();
+        if s.state == ScanState::Waiting && s.resume_at == Some(at) {
+            start(&handle, true);
+        }
+    });
+}
+
+/// At startup, carries on a scan that was waiting for Steam when the app
+/// closed, once the saved wait is over (or in a minute).
+pub fn resume_after_restart(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if state
+        .db
+        .read(db::last_scan_status)
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("waiting")
+    {
+        return;
+    }
+    let at = crate::prices::saved_wait_until(&state).max(db::now() + 60);
+    state.scan.set(app, |s| {
+        s.state = ScanState::Waiting;
+        s.resume_at = Some(at);
+        s.message = Some(format!(
+            "Steam asked the app to slow down, so the scan is taking a break for {}. It carries on by itself if the app stays open.",
+            duration_text((at - db::now()).max(60) as u64)
+        ));
+    });
+    schedule_resume(app, at);
 }
 
 /// Games still waiting for their catalog, and a time estimate.
