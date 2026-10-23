@@ -49,7 +49,8 @@
   let sortKey = $state<SortKey>('game');
   let descending = $state(false);
   let active = $state(-1);
-  let list: { reveal: (i: number) => void; toTop: () => void } | undefined = $state();
+  let list: { reveal: (i: number) => void; toTop: () => void; firstVisible: () => number } | undefined =
+    $state();
   let tagsOpen = $state(false);
 
   const gameName = (appid: number) => games.get(appid)?.name ?? `App ${appid}`;
@@ -107,7 +108,10 @@
       return true;
     });
     const groupRank = (g: Group) => GROUP_ORDER.indexOf(g);
-    const byName = (a: ItemRow, b: ItemRow) => a.name.localeCompare(b.name);
+    // Emoticons are named like ":smile:"; sort them by the word inside.
+    const bare = (n: string) => n.replace(/^:+|:+$/g, '');
+    const byName = (a: ItemRow, b: ItemRow) =>
+      bare(a.name).localeCompare(bare(b.name), undefined, { numeric: true, sensitivity: 'base' });
     const byGame = (a: ItemRow, b: ItemRow) =>
       gameName(a.appid).localeCompare(gameName(b.appid)) || a.appid - b.appid;
     const byKind = (a: ItemRow, b: ItemRow) => groupRank(a.group) - groupRank(b.group) || a.kind.localeCompare(b.kind);
@@ -244,6 +248,8 @@
 
   async function move(to: number) {
     if (!shown.length) return;
+    // With nothing picked yet, start from the first row on screen.
+    if (active < 0) to = Math.max(0, to + (list?.firstVisible() ?? 0));
     active = Math.max(0, Math.min(shown.length - 1, to));
     // With an item's panel open, the panel follows along.
     if (nav.item) openItem(shown[active].key);
