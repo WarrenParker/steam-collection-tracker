@@ -49,6 +49,33 @@ jobs:
         shell: bash
         run: set -o pipefail; cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tee -a build.log
 
+      # Known security advisories in the app's dependencies. These don't stop
+      # the build; their summary lines go in the build report.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          rust=$(cargo audit --file src-tauri/Cargo.lock 2>&1 || true)
+          echo "$rust" > audit.log
+          vulns=$(echo "$rust" | grep -E "^ID:" | wc -l | tr -d ' ')
+          warns=$(echo "$rust" | grep -cE "^Warning:" || true)
+          echo "Audit: Rust crates, $vulns advisories, $warns warnings" >> build.log
+          echo "$rust" | grep -E "^(Crate|ID|Title|Warning):" | head -40 | sed 's/^/Audit: /' >> build.log || true
+          node=$(npm audit --omit=dev 2>&1 || true)
+          echo "$node" >> audit.log
+          echo "Audit: npm, $(echo "$node" | grep -E "found [0-9]+ vulnerabilit|vulnerabilit" | tail -n 1)" >> build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockfiles-and-audit
+          path: |
+            src-tauri/Cargo.lock
+            package-lock.json
+            audit.log
+
       - name: Build app
         shell: bash
         run: set -o pipefail; npx tauri build 2>&1 | tee -a build.log
@@ -113,7 +140,7 @@ jobs:
           encode() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
           touch build.log
           if [ "${{ job.status }}" = "success" ]; then
-            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists|CHANGELOG" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
+            body=$( { grep -E "test result|Built SteamCollectionTracker|Published release|already exists|CHANGELOG|^Audit" build.log || true; grep -E "^warning|^\(!\)|svelte.*\(" build.log | sort | uniq -c | sort -rn | head -40 || true; } | encode)
             echo "::notice title=Build report::${body}"
           else
             # Compiler errors first (each with its location), then the end of the log.

@@ -936,6 +936,17 @@ pub fn history_targets(
     rows.collect()
 }
 
+/// Marks the most recent scan as paused when it was waiting, so a restart
+/// doesn't carry on a scan the user paused.
+pub fn pause_waiting_scan(c: &Connection) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE scans SET status = 'paused'
+         WHERE id = (SELECT MAX(id) FROM scans) AND status = 'waiting'",
+        [],
+    )?;
+    Ok(())
+}
+
 /// How the most recent scan ended ("done", "paused", "waiting", "failed"),
 /// or `None` before the first scan.
 pub fn last_scan_status(c: &Connection) -> rusqlite::Result<Option<String>> {

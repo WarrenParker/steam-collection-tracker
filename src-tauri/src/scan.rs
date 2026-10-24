@@ -245,6 +245,7 @@ pub fn pause(app: &AppHandle) -> ScanStatus {
             s.label = "Pausing…".to_string();
         });
     } else if state.scan.status().state == ScanState::Waiting {
+        let _ = state.db.write(|tx| db::pause_waiting_scan(tx));
         state.scan.set(app, |s| {
             s.state = ScanState::Paused;
             s.resume_at = None;

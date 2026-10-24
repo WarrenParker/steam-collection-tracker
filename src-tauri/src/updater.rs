@@ -21,6 +21,8 @@ use crate::paths::AppPaths;
 use crate::state::AppState;
 
 pub const ASSET_NAME: &str = "SteamCollectionTracker.exe";
+/// Far larger than the app (about 9 MB), so a bad answer can't fill memory.
+const MAX_UPDATE_BYTES: usize = 100 * 1024 * 1024;
 
 /// Set by the GitHub build ("owner/repo"). Local builds have no updater.
 const REPO: Option<&str> = option_env!("UPDATE_REPO");
@@ -191,6 +193,15 @@ async fn all_releases(http: &reqwest::Client) -> Result<Vec<Release>, String> {
     Ok(releases)
 }
 
+/// Update files must come from this repository's own GitHub releases.
+fn trusted_download(url: &str, repo: &str) -> bool {
+    if repo.is_empty() || url.contains("..") || url.contains('@') {
+        return false;
+    }
+    let prefix = format!("https://github.com/{repo}/releases/download/").to_ascii_lowercase();
+    url.to_ascii_lowercase().starts_with(&prefix)
+}
+
 async fn download_and_stage(
     http: &reqwest::Client,
     paths: &AppPaths,
@@ -202,6 +213,12 @@ async fn download_and_stage(
             release.version
         ));
     };
+    let repo = REPO.unwrap_or_default();
+    if !trusted_download(exe_url, repo) || !trusted_download(sha_url, repo) {
+        return Err(
+            "The update isn't from this app's own releases, so it wasn't installed.".to_string(),
+        );
+    }
     let failed = |_: reqwest::Error| {
         "Couldn't download the update. Check your internet connection and try again.".to_string()
     };
@@ -233,6 +250,11 @@ async fn download_and_stage(
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase();
+    if bytes.len() > MAX_UPDATE_BYTES {
+        return Err(
+            "The download didn't pass its safety check, so it wasn't installed.".to_string(),
+        );
+    }
     let actual = hexutil::encode(&Sha256::digest(&bytes));
     if expected.len() != 64 || expected != actual {
         return Err(
@@ -430,5 +452,23 @@ mod tests {
         });
         assert!(!parse_release(&missing_hash).unwrap().installable());
         assert!(parse_release(&json!({"tag_name": "nightly"})).is_none());
+    }
+
+    #[test]
+    fn update_files_come_from_this_repos_releases() {
+        let repo = "WarrenParker/steam-collection-tracker";
+        let good = "https://github.com/WarrenParker/steam-collection-tracker/releases/download/v0.8.2/SteamCollectionTracker.exe";
+        assert!(trusted_download(good, repo));
+        assert!(trusted_download(&good.to_lowercase(), repo));
+        for bad in [
+            "https://example.com/a.exe",
+            "http://github.com/WarrenParker/steam-collection-tracker/releases/download/v1/a.exe",
+            "https://github.com/someone/else/releases/download/v1/a.exe",
+            "https://github.com/WarrenParker/steam-collection-tracker/releases/download/../../x/a.exe",
+            "https://github.com/WarrenParker/steam-collection-tracker/releases/download@evil.com/a.exe",
+        ] {
+            assert!(!trusted_download(bad, repo), "{bad}");
+        }
+        assert!(!trusted_download(good, ""));
     }
 }
