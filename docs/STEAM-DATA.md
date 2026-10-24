@@ -109,3 +109,9 @@ Each catalog is checked against [SteamCardExchange](https://www.steamcardexchang
 - Owned card quantities on the card pages match the inventory for Back to Bed (regular and foil) and Kingdom Rush.
 - SteamCardExchange's page for The Last of Us Part I (1888930) lists 9 cards, 6 emoticons, 9 backgrounds, 5 stickers, 2 avatar frames, 3 animated avatars and a startup movie, the same as the catalog. Its emoticons and backgrounds have Market prices and the rest don't, which matches the Points and Not marketable tags.
 - The app's completion figures matched a separate calculation from the same database: 30 of 5,501 items complete and 17 of 194 games started with Steam Family games on, and Back to Bed at 68.2% (62.9% with "Also need the cards in my inventory").
+
+**Oct 24, 2026 (0.8.2, overnight price read).**
+
+- Market prices for all 174 games (4,911 items) were read again between 10:42pm and 12:28am, signed in, without a refusal. The pace sped back up from one request every 30 seconds to one every 7.5 seconds, 50 answers at a time.
+- Account value is $9.46 from 73 sellable copies, the same as a separate calculation from the database. Cost to complete is $3,922.78 plus 1,204,700 points (it was $4,028.74 on Oct 22, before the new prices).
+- Vampire Survivors (1794680) against SteamCardExchange's showcase, updated two minutes apart: 17 of 19 cheapest listings identical (cards, foils, emoticons, backgrounds, booster pack), and 2 cards a cent lower in the app ($0.07 against $0.08).
