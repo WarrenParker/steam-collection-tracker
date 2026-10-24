@@ -171,8 +171,10 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 - **API key:** encrypted with Windows DPAPI for the current user. It never reaches the interface; only its last four characters are shown.
 - **Steam sign-in:** happens on Steam's own page. The app never reads or stores the password. The cookies live in the WebView2 profile, which Windows encrypts.
 - **Reports:** every secret (API key, cookies, tokens) is blanked out before a connection test report is written.
-- **External links:** the interface can only open links to Steam and GitHub, and only in the user's own browser.
-- **Content security policy:** the interface loads nothing from the internet except images.
+- **External links:** the interface can only open https pages on Steam and GitHub (checked by parsing the address, with no user name, password or port), and only in the user's own browser.
+- **Content security policy:** the interface loads nothing from the internet except images from Steam's image servers.
+- **Updates:** only downloaded from this repository's own GitHub releases, checked against the release's SHA-256 file, and refused when far larger than the app.
+- **Dependencies:** `Cargo.lock` and `package-lock.json` are committed, so every build uses the same package versions. Each build runs `cargo audit` and `npm audit` and lists any advisories in the build report. The audit's remaining warnings are for Linux-only crates (`glib`, `zbus`) that the Windows app doesn't include.
 
 ## Conventions
 
