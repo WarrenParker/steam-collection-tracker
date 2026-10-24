@@ -156,9 +156,15 @@
     return i < 0 ? TAG_ORDER.length : i;
   }
 
-  // A new filter or sort starts back at the top.
+  // A new filter or sort starts back at the top. Reading the list again after
+  // a change (like an item's availability) keeps your place.
+  const viewKey = $derived(
+    JSON.stringify([query, have, kind, availability, gameFilter, tags, minPrice, maxPrice, sortKey, descending]),
+  );
+  let lastViewKey = '';
   $effect(() => {
-    void shown;
+    if (viewKey === lastViewKey) return;
+    lastViewKey = viewKey;
     active = -1;
     list?.toTop();
   });

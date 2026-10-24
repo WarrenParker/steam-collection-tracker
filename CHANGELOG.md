@@ -2,6 +2,19 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.3] - 2026-10-24
+
+### Fixed
+
+- Pausing a scan that's waiting for Steam stays paused after the app restarts, instead of carrying on by itself.
+- Changing an item's availability from its panel keeps your place in the Items list, instead of jumping back to the top.
+
+### Security
+
+- Updates are only downloaded from the app's own GitHub releases, and a download far larger than the app is refused.
+- Links the app opens are checked properly: only https pages on Steam and GitHub, with no user name, password or port.
+- Every build checks the app's Rust and npm packages against known security advisories.
+
 ## [0.8.2] - 2026-10-23
 
 ### Fixed
