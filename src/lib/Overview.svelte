@@ -614,7 +614,7 @@
             {/if}
             <p class="section-note small-note">
               Prices from {agoUnix(completion.prices_at)}. Price history read for {num(prices.with_history)} of
-              {num(prices.marketable)} items.
+              {num(prices.marketable)} items; opening an item reads its history.
             </p>
             {#if completion.currency_note}
               <p class="section-note small-note">{completion.currency_note}</p>
