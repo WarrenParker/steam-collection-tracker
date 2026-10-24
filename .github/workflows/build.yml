@@ -44,7 +44,7 @@ jobs:
 
       - name: Install interface packages
         shell: bash
-        run: set -o pipefail; npm install 2>&1 | tee -a build.log
+        run: set -o pipefail; npm ci 2>&1 | tee -a build.log
 
       - name: Build interface
         shell: bash
@@ -52,7 +52,7 @@ jobs:
 
       - name: Run tests
         shell: bash
-        run: set -o pipefail; cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tee -a build.log
+        run: set -o pipefail; cargo test --locked --manifest-path src-tauri/Cargo.toml 2>&1 | tee -a build.log
 
       - name: Commit lockfiles
         if: inputs.commit_lockfiles && github.ref != 'refs/heads/main'
@@ -75,10 +75,10 @@ jobs:
         run: |
           rust=$(cargo audit --file src-tauri/Cargo.lock 2>&1 || true)
           echo "$rust" > audit.log
-          vulns=$(echo "$rust" | grep -E "^ID:" | wc -l | tr -d ' ')
-          warns=$(echo "$rust" | grep -cE "^Warning:" || true)
-          echo "Audit: Rust crates, $vulns advisories, $warns warnings" >> build.log
-          echo "$rust" | grep -E "^(Crate|ID|Title|Warning):" | head -40 | sed 's/^/Audit: /' >> build.log || true
+          vulns=$(echo "$rust" | grep -oE "[0-9]+ vulnerabilit(y|ies) found" | grep -oE "^[0-9]+" || echo 0)
+          warns=$(echo "$rust" | grep -oE "[0-9]+ allowed warnings? found" | grep -oE "^[0-9]+" || echo 0)
+          echo "Audit: Rust crates, $vulns vulnerabilities, $warns warnings (unmaintained or unsound crates)" >> build.log
+          echo "$rust" | grep -E "^(Crate|Title):" | paste - - | head -20 | sed 's/^/Audit: /' >> build.log || true
           node=$(npm audit --omit=dev 2>&1 || true)
           echo "$node" >> audit.log
           echo "Audit: npm, $(echo "$node" | grep -E "found [0-9]+ vulnerabilit|vulnerabilit" | tail -n 1)" >> build.log
