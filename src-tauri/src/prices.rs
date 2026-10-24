@@ -133,10 +133,12 @@ fn restore_market(state: &AppState) {
     }
 }
 
-/// The latest time a saved Market wait runs until (Unix time), or 0.
+/// When the saved wait on signed-in Market requests, which scans use, runs
+/// until (Unix time), or 0. Price history (anonymous) isn't read by scans.
 pub fn saved_wait_until(state: &AppState) -> i64 {
     META_MARKET_WAIT
         .iter()
+        .filter(|(signed_in, _, _)| *signed_in)
         .filter_map(|(_, _, until_key)| {
             state
                 .db

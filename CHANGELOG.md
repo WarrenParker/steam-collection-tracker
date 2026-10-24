@@ -2,6 +2,14 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.5] - 2026-10-24
+
+### Fixed
+
+- The dashboard's "since" dates and Recent changes use your own time zone, and each day's figures are kept by your local day, so an evening scan counts for that evening.
+- After a restart, a waiting scan no longer waits for Steam's limit on price history, which scans don't read any more.
+- The connection test reads price history without sign-in, the same way the app does.
+
 ## [0.8.4] - 2026-10-24
 
 ### Changed

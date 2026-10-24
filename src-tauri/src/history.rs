@@ -133,6 +133,13 @@ fn held_now_is_empty(snap: &Snapshot) -> bool {
     snap.items.iter().all(|i| i.held == 0)
 }
 
+/// Today's number in the computer's own time zone, so an evening scan counts
+/// for that evening rather than the next day.
+fn local_day(now: i64) -> i64 {
+    let offset = i64::from(chrono::Local::now().offset().local_minus_utc());
+    (now + offset).div_euclid(DAY)
+}
+
 fn record_progress(tx: &Transaction<'_>, a: &AccountCompletion, now: i64) -> rusqlite::Result<()> {
     if a.total == 0 {
         return Ok(());
@@ -143,7 +150,7 @@ fn record_progress(tx: &Transaction<'_>, a: &AccountCompletion, now: i64) -> rus
              (day, at, percent, owned, complete, total, game_average, currency, value, cost, cost_points)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
-            now.div_euclid(DAY),
+            local_day(now),
             now,
             a.percent,
             a.owned,
