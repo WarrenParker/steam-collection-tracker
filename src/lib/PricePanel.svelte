@@ -146,7 +146,7 @@
       {#if p.history_at}
         <p class="field-error">{error}</p>
       {:else}
-        <p class="muted price-wait">No price history yet. The scan reads it, a few items at a time. {error}</p>
+        <p class="muted price-wait">No price history yet. {error}</p>
       {/if}
     {/if}
 

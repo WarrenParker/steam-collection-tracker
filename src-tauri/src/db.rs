@@ -916,26 +916,6 @@ pub fn finish_market_app(c: &Connection, appid: u64, started: i64) -> rusqlite::
     Ok(())
 }
 
-/// Market items in games that count for the account whose price history is
-/// missing or due, owned games first, and whether each has one already.
-pub fn history_targets(
-    c: &Connection,
-    family: bool,
-    now: i64,
-) -> rusqlite::Result<Vec<(String, bool)>> {
-    let mut st = c.prepare(&format!(
-        "SELECT m.hash_name, m.history_at IS NOT NULL FROM market m JOIN apps a ON a.appid = m.appid
-         WHERE m.class IN {MARKET_CLASSES}
-           AND (a.owned = 1 OR (a.family = 1 AND ?1))
-           AND (m.history_due IS NULL OR m.history_due <= ?2)
-         ORDER BY a.owned DESC, m.history_at IS NOT NULL, m.appid, m.hash_name"
-    ))?;
-    let rows = st.query_map(params![family, now], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
-    })?;
-    rows.collect()
-}
-
 /// Marks the most recent scan as paused when it was waiting, so a restart
 /// doesn't carry on a scan the user paused.
 pub fn pause_waiting_scan(c: &Connection) -> rusqlite::Result<()> {
@@ -958,36 +938,22 @@ pub fn last_scan_status(c: &Connection) -> rusqlite::Result<Option<String>> {
     .optional()
 }
 
+/// Whether an item's stored price history is due to be read again.
+pub fn history_is_due(c: &Connection, hash_name: &str, now: i64) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT COALESCE(history_due <= ?2, 0) FROM market WHERE hash_name = ?1",
+        params![hash_name, now],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(|v| v.unwrap_or(false))
+}
+
 /// Whether the Market lists an item by this name.
 pub fn market_has(c: &Connection, hash_name: &str) -> rusqlite::Result<bool> {
     c.query_row(
         "SELECT EXISTS (SELECT 1 FROM market WHERE hash_name = ?1)",
         [hash_name],
-        |r| r.get(0),
-    )
-}
-
-/// Items in games that count whose price history hasn't been read yet and
-/// isn't waiting for a retry.
-pub fn history_missing(c: &Connection, family: bool, now: i64) -> rusqlite::Result<u64> {
-    let n: i64 = c.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM market m JOIN apps a ON a.appid = m.appid
-             WHERE m.class IN {MARKET_CLASSES} AND m.history_at IS NULL
-               AND (m.history_due IS NULL OR m.history_due <= ?2)
-               AND (a.owned = 1 OR (a.family = 1 AND ?1))"
-        ),
-        params![family, now],
-        |r| r.get(0),
-    )?;
-    Ok(n.max(0) as u64)
-}
-
-/// Whether any item has a price history yet.
-pub fn has_any_history(c: &Connection) -> rusqlite::Result<bool> {
-    c.query_row(
-        "SELECT EXISTS (SELECT 1 FROM market WHERE history_at IS NOT NULL)",
-        (),
         |r| r.get(0),
     )
 }
@@ -1030,15 +996,6 @@ pub fn save_history(
             s.last_day,
             h.recent,
         ],
-    )?;
-    Ok(())
-}
-
-/// Tries an item's history again later, when Steam's answer couldn't be read.
-pub fn postpone_history(c: &Connection, hash_name: &str, due: i64) -> rusqlite::Result<()> {
-    c.execute(
-        "UPDATE market SET history_due = ?2 WHERE hash_name = ?1",
-        params![hash_name, due],
     )?;
     Ok(())
 }

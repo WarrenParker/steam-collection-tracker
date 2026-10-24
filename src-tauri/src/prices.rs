@@ -3,10 +3,9 @@
 //!
 //! 5. **Market prices:** each game's items on the Market, ten per request,
 //!    with the cheapest listing. Read again when older than a day.
-//! 6. **Price history:** each item's price history, items that change cost
-//!    to complete first, then items the user owns, then the rest. A history
-//!    is read once and then again about a month later, staggered so only a
-//!    few items fall due each day.
+//! Price history is read when the user opens an item, not during scans:
+//! Steam refused the app's bulk history reads for days at a time. A history
+//! is kept for about a month, then read again the next time the item opens.
 //!
 //! Order books, for cards that still need two or more copies (so the cost
 //! walks up the listings), are read when the user opens a game rather than
@@ -15,7 +14,6 @@
 //! Exchange rates come from api.frankfurter.dev, once a day, and only when
 //! prices are shown in a currency other than the one Steam answers in.
 
-use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -38,10 +36,6 @@ const BOOK_STALE_DAYS: i64 = 6;
 /// A price history is read again 23 to 37 days later.
 const HISTORY_DAYS: i64 = 30;
 const HISTORY_SPREAD_DAYS: i64 = 7;
-/// After an answer that couldn't be read, try that item again a day later.
-const RETRY_DAYS: i64 = 1;
-/// A first price history fill expected to take longer than this waits for a go-ahead.
-const CONFIRM_SECONDS: f64 = 10.0 * 60.0;
 /// Seconds per Market request on long reads, which the request budget holds
 /// to about one every 7.5 seconds.
 pub const SECONDS_PER_REQUEST: f64 = 7.5;
@@ -155,13 +149,6 @@ pub fn saved_wait_until(state: &AppState) -> i64 {
         .unwrap_or(0)
 }
 
-/// Seconds per Market request on long reads at the current pace, which is
-/// slower after refusals.
-pub fn seconds_per_request(state: &AppState) -> f64 {
-    restore_market(state);
-    (state.steam.market_period_ms() as f64 / 1000.0).max(SECONDS_PER_REQUEST)
-}
-
 /// Saves the Market pace, refusals in a row and any wait, for the next run
 /// and the next app start.
 fn save_market(state: &AppState) {
@@ -183,12 +170,11 @@ fn save_market(state: &AppState) {
 pub(crate) async fn stages(
     ctx: &Ctx<'_>,
     family_on: bool,
-    resume: bool,
     cookie: Option<&str>,
 ) -> Result<RunEnd, String> {
     let state = ctx.state;
     restore_market(state);
-    let outcome = run_stages(ctx, family_on, resume, cookie).await;
+    let outcome = run_stages(ctx, family_on, cookie).await;
     save_market(state);
     outcome
 }
@@ -196,7 +182,6 @@ pub(crate) async fn stages(
 async fn run_stages(
     ctx: &Ctx<'_>,
     family_on: bool,
-    resume: bool,
     cookie: Option<&str>,
 ) -> Result<RunEnd, String> {
     let period = || ctx.state.steam.market_period_ms() as f64 / 1000.0;
@@ -296,68 +281,9 @@ async fn run_stages(
         ctx.progress(i as u64 + 1, Some(timer.estimate(pages_left, period())));
     }
 
-    // Stage 6: price histories that are missing or due. Items that change
-    // cost to complete come first (their usual price decides whether an
-    // outlying listing counts), then items the user owns (value), then the
-    // rest. New histories come before monthly refreshes.
-    let now = db::now();
-    let rules = completion::Rules::from_settings(&state.settings());
-    let snap = state.snapshot(rules)?;
-    let mut rank: HashMap<&str, u8> = HashMap::new();
-    for i in &snap.items {
-        let Some(p) = i.price.as_ref() else { continue };
-        let counts = snap
-            .games
-            .get(&i.appid)
-            .is_some_and(|g| g.counts_for_account);
-        let r = if i.counted && counts && i.have < i.needed {
-            0
-        } else if i.held > 0 {
-            1
-        } else {
-            2
-        };
-        let e = rank.entry(p.hash_name.as_str()).or_insert(r);
-        *e = (*e).min(r);
-    }
-    let mut histories = data.read(|c| db::history_targets(c, family_on, now))?;
-    histories.sort_by_key(|(hash, read)| (*read, rank.get(hash.as_str()).copied().unwrap_or(2)));
-    drop(rank);
-    drop(snap);
-    let total = histories.len() as u64;
-    if total == 0 {
-        return Ok(RunEnd::Done { seconds: 0 });
-    }
-    let first_fill = !data.read(db::has_any_history)?;
-    if !resume && first_fill && total as f64 * SECONDS_PER_REQUEST > CONFIRM_SECONDS {
-        return Ok(RunEnd::NeedsPriceConfirm { items: total });
-    }
-
-    // Price history is read without sign-in (see `fetch_history`).
-    ctx.stage(6, "Reading price history…", total);
-    let timer = Timer::new();
-    let mut done = 0u64;
-    for (hash, _) in &histories {
-        if ctx.pause_requested() {
-            return Ok(RunEnd::Paused);
-        }
-        if state.steam.is_blocked(Bucket::Market, false) {
-            return Ok(waiting(state, false));
-        }
-        let t = Instant::now();
-        let outcome = fetch_history(state, hash, cookie, notify).await?;
-        timer.add(t);
-        match outcome {
-            History::Refused => return Ok(waiting(state, false)),
-            History::Read(h) => save_history(state, hash, &h)?,
-            History::Unreadable => {
-                data.write(|tx| db::postpone_history(tx, hash, db::now() + RETRY_DAYS * DAY))?
-            }
-        }
-        done += 1;
-        ctx.progress(done, Some(timer.estimate(total - done, period())));
-    }
-
+    // Price history isn't read in bulk: Steam refused the app's bulk reads
+    // for days at a time, so each item's history is read when its panel is
+    // opened (see `item_history`).
     Ok(RunEnd::Done { seconds: 0 })
 }
 
@@ -506,9 +432,10 @@ pub struct PriceHistory {
     pub read_at: Option<i64>,
 }
 
-/// An item's price history for its detail view: the stored last year, read
-/// from Steam first if the app doesn't have it yet, or the whole history,
-/// always read fresh, when `full` is set.
+/// An item's price history for its panel: the stored last year, read from
+/// Steam when the app doesn't have it yet or it's due again (about a month
+/// after the last read), or the whole history, always read fresh, when
+/// `full` is set. When a due history can't be read, the stored one is shown.
 pub async fn item_history(
     state: &AppState,
     hash: &str,
@@ -521,40 +448,57 @@ pub async fn item_history(
     } else {
         state.db.read(|c| db::recent_history(c, hash))?
     };
-    let (points, currency) =
-        match stored {
-            Some((blob, currency)) => (series::decode(&blob).unwrap_or_default(), currency),
-            None => {
-                if !state.db.read(|c| db::market_has(c, hash))? {
-                    return Err("That item isn't on the Market.".to_string());
+    restore_market(state);
+    let due = stored.is_some()
+        && state.db.read(|c| db::history_is_due(c, hash, db::now()))?
+        && !state.steam.is_blocked(Bucket::Market, false);
+    let (points, currency) = match stored.filter(|_| !due) {
+        Some((blob, currency)) => (series::decode(&blob).unwrap_or_default(), currency),
+        None => {
+            if !state.db.read(|c| db::market_has(c, hash))? {
+                return Err("That item isn't on the Market.".to_string());
+            }
+            let quiet = |_: String| {};
+            let outcome = fetch_history(state, hash, cookie, &quiet).await;
+            save_market(state);
+            let fallback = || -> Result<Option<(Vec<series::Point>, i64)>, String> {
+                if full {
+                    return Ok(None);
                 }
-                let quiet = |_: String| {};
-                restore_market(state);
-                let outcome = fetch_history(state, hash, cookie, &quiet).await;
-                save_market(state);
-                match outcome? {
-                    History::Refused => return Err(slow_down_text(state, false)),
-                    History::Unreadable => return Err(
+                Ok(state
+                    .db
+                    .read(|c| db::recent_history(c, hash))?
+                    .map(|(blob, cur)| (series::decode(&blob).unwrap_or_default(), cur)))
+            };
+            match outcome? {
+                History::Refused => match fallback()? {
+                    Some(kept) => kept,
+                    None => return Err(slow_down_text(state, false)),
+                },
+                History::Unreadable => match fallback()? {
+                    Some(kept) => kept,
+                    None => return Err(
                         "Steam's price history for this item couldn't be read. Try again later."
                             .to_string(),
                     ),
-                    History::Read(h) => {
-                        save_history(state, hash, &h)?;
-                        let currency = if h.currency > 0 {
-                            h.currency
-                        } else {
-                            state.db.read(market_currency)?.unwrap_or(1)
-                        };
-                        let shaped = if full {
-                            series::for_chart(&h.daily, today())
-                        } else {
-                            series::recent(&h.daily, today())
-                        };
-                        (shaped, currency)
-                    }
+                },
+                History::Read(h) => {
+                    save_history(state, hash, &h)?;
+                    let currency = if h.currency > 0 {
+                        h.currency
+                    } else {
+                        state.db.read(market_currency)?.unwrap_or(1)
+                    };
+                    let shaped = if full {
+                        series::for_chart(&h.daily, today())
+                    } else {
+                        series::recent(&h.daily, today())
+                    };
+                    (shaped, currency)
                 }
             }
-        };
+        }
+    };
     let conv = state
         .db
         .read(|c| completion::Converter::load(c, rules.prices.currency))?;

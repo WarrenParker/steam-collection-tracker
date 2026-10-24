@@ -2,6 +2,13 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.8.4] - 2026-10-24
+
+### Changed
+
+- **Price history is read when you open an item,** not during scans. Steam refused the app's bulk price history reads for days at a time, so scans now finish once current prices are read, and an item's history, chart and averages arrive the first time you open it. A history is kept for about a month, then read again the next time you open the item; if Steam can't be reached then, the one you have is shown.
+- Price spike and dip tags, and the rule that counts a listing far above an item's usual price at that usual price, apply to items whose history has been read.
+
 ## [0.8.3] - 2026-10-24
 
 ### Fixed

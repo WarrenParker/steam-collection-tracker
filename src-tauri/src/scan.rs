@@ -262,10 +262,6 @@ pub(crate) enum RunEnd {
     Paused,
     /// Stopped before a long first catalog, waiting for a go-ahead.
     NeedsConfirm,
-    /// Stopped before reading every item's price history for the first time.
-    NeedsPriceConfirm {
-        items: u64,
-    },
     /// Steam refused card page requests; carry on at this time.
     Waiting(i64),
 }
@@ -290,15 +286,6 @@ fn finish(app: &AppHandle, outcome: Result<RunEnd, String>) {
             Some(format!(
                 "Your library is read. Cataloging every game's items takes about {}. You can keep using the app while it runs, and pause it anytime.",
                 duration_text(remaining_seconds.unwrap_or(0))
-            )),
-            None,
-        ),
-        Ok(RunEnd::NeedsPriceConfirm { items }) => (
-            ScanState::Paused,
-            Some(format!(
-                "Prices are read. Reading the price history of {} items takes {}, one request every few seconds. You can keep using the app while it runs, and pause it anytime.",
-                items,
-                duration_text((items as f64 * crate::prices::seconds_per_request(&state)).ceil() as u64)
             )),
             None,
         ),
@@ -386,25 +373,10 @@ fn backlog(state: &AppState) -> (u64, Option<u64>) {
     (remaining, seconds)
 }
 
-/// Price histories not read yet, once Market prices have been read.
-fn price_backlog(state: &AppState) -> (u64, Option<u64>) {
-    let family = state.settings().include_family;
-    let read = state
-        .db
-        .read(|c| db::get_meta(c, "market_currency_at"))
-        .ok()
-        .flatten()
-        .is_some();
-    if !read {
-        return (0, None);
-    }
-    let missing = state
-        .db
-        .read(|c| db::history_missing(c, family, db::now()))
-        .unwrap_or(0);
-    let seconds = (missing > 0)
-        .then(|| (missing as f64 * crate::prices::seconds_per_request(state)).ceil() as u64);
-    (missing, seconds)
+/// Price history is read when an item is opened, so scans never leave any
+/// behind.
+fn price_backlog(_state: &AppState) -> (u64, Option<u64>) {
+    (0, None)
 }
 
 // ---- The run itself -----------------------------------------------------------
@@ -512,7 +484,7 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
     let outcome = match outcome {
         Ok(RunEnd::Done { .. }) => {
             let cookie = session.as_ref().map(|s| s.community_header());
-            crate::prices::stages(&ctx, family_on, resume, cookie.as_deref()).await
+            crate::prices::stages(&ctx, family_on, cookie.as_deref()).await
         }
         other => other,
     };
@@ -520,7 +492,7 @@ async fn run(app: &AppHandle, resume: bool) -> Result<RunEnd, String> {
     // Whatever happened, keep the overview's catalog figures current.
     let status = match &outcome {
         Ok(RunEnd::Done { .. }) => "done",
-        Ok(RunEnd::Paused | RunEnd::NeedsConfirm | RunEnd::NeedsPriceConfirm { .. }) => "paused",
+        Ok(RunEnd::Paused | RunEnd::NeedsConfirm) => "paused",
         Ok(RunEnd::Waiting(_)) => "waiting",
         Err(_) => "failed",
     };
