@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.8.5. Phase 4 is in progress.
+**Now:** version 0.8.5. Phase 4 is done; Phase 5 is next.
 
 ## Goal
 
@@ -50,15 +50,17 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Long Market reads paced to stay under the rate Steam refuses. [0.6.2](../CHANGELOG.md#062---2026-10-22)
 - ✅ Longer waits after refusals in a row, price history read most useful first, and order books read when a game is opened. [0.6.3](../CHANGELOG.md#063---2026-10-22)
 
-## Phase 4: Interface
+## Phase 4: Interface (done)
 
 - ✅ Sortable list of all items with filters, Ctrl+K search across games and items, and keyboard shortcuts. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 - ✅ Per-game art grid. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 - ✅ Item detail in a side panel with a small price chart and quick actions. [0.7.0](../CHANGELOG.md#070---2026-10-22)
 - ✅ Dashboard: completion, value and cost to complete with daily trends, games closest to complete and cheapest to finish, good times to sell and buy, recent changes. [0.8.0](../CHANGELOG.md#080---2026-10-23)
 - ✅ Sortable game list. [0.4.0](../CHANGELOG.md#040---2026-10-22)
-- ⬜ Full settings panel.
-- ⬜ Virtualized lists, so tens of thousands of items stay smooth. The all-items list is done. [0.7.0](../CHANGELOG.md#070---2026-10-22)
+- ✅ Full settings panel, with theme previews, the tab to open on, list or art for a game's items, and the keyboard shortcuts. [0.8.0](../CHANGELOG.md#080---2026-10-23)
+- ✅ Virtualized lists, so tens of thousands of items stay smooth: the all-items list draws only the rows on screen. [0.7.0](../CHANGELOG.md#070---2026-10-22)
+- ✅ Fine-tuning from testing on a real account, security hardening and dependency audits. [0.8.1 to 0.8.5](../CHANGELOG.md#085---2026-10-24)
+- ✅ Price history read when an item is opened, after Steam refused the app's bulk reads. [0.8.4](../CHANGELOG.md#084---2026-10-24) Steam refuses single reads too for now; see the idea board.
 
 ## Phase 5: Shared prices, history and banner
 
