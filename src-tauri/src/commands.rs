@@ -644,9 +644,10 @@ fn report_path(state: &AppState, path: &str) -> Result<PathBuf, String> {
     let requested = Path::new(path)
         .canonicalize()
         .map_err(|_| "That report file no longer exists.".to_string())?;
-    if !requested.starts_with(&dir) {
+    if !requested.starts_with(&dir) || !requested.is_file() {
         return Err("Only connection test reports can be opened here.".to_string());
     }
+    // Explorer doesn't take Windows' long \\?\ form that canonicalize gives.
     Ok(PathBuf::from(path))
 }
 
@@ -663,19 +664,32 @@ pub fn reveal_report(state: State<'_, AppState>, path: String) -> Result<(), Str
         .map_err(|e| format!("Couldn't open the folder: {e}"))
 }
 
-const ALLOWED_LINKS: &[&str] = &[
-    "https://steamcommunity.com/",
-    "https://store.steampowered.com/",
-    "https://help.steampowered.com/",
-    "https://github.com/",
+/// Sites the app opens in the user's browser.
+const ALLOWED_HOSTS: &[&str] = &[
+    "steamcommunity.com",
+    "store.steampowered.com",
+    "help.steampowered.com",
+    "github.com",
 ];
+
+/// The link, tidied, when it's an https page on one of the allowed sites
+/// with no user name, password or port.
+fn allowed_link(url: &str) -> Option<String> {
+    let u = reqwest::Url::parse(url.trim()).ok()?;
+    let ok = u.scheme() == "https"
+        && u.username().is_empty()
+        && u.password().is_none()
+        && u.port().is_none()
+        && u.host_str().is_some_and(|h| ALLOWED_HOSTS.contains(&h));
+    ok.then(|| u.to_string())
+}
 
 /// Opens a Steam or GitHub page in the user's normal web browser.
 #[tauri::command]
 pub fn open_link(url: String) -> Result<(), String> {
-    if !ALLOWED_LINKS.iter().any(|prefix| url.starts_with(prefix)) {
+    let Some(url) = allowed_link(&url) else {
         return Err("That link can't be opened from the app.".to_string());
-    }
+    };
     tauri_plugin_opener::open_url(&url, None::<&str>)
         .map_err(|e| format!("Couldn't open the link: {e}"))
 }
@@ -766,4 +780,28 @@ pub async fn sign_out(app: AppHandle, state: State<'_, AppState>) -> Result<Sett
     })?;
     session::sign_out(&app).await;
     Ok(updated.view())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_link;
+
+    #[test]
+    fn opens_only_steam_and_github_pages() {
+        assert!(allowed_link("https://steamcommunity.com/market/listings/753/570-Foo").is_some());
+        assert!(allowed_link("https://store.steampowered.com/points/shop/app/570").is_some());
+        assert!(allowed_link("https://github.com/WarrenParker/steam-collection-tracker").is_some());
+        for bad in [
+            "http://steamcommunity.com/",
+            "https://steamcommunity.com.evil.com/",
+            "https://evil.com/?https://steamcommunity.com/",
+            "https://user:pass@steamcommunity.com/",
+            "https://steamcommunity.com:8443/",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "not a link",
+        ] {
+            assert!(allowed_link(bad).is_none(), "{bad}");
+        }
+    }
 }
