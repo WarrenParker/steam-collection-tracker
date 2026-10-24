@@ -1,6 +1,6 @@
 [package]
 name = "steam-collection-tracker"
-version = "0.8.4"
+version = "0.8.5"
 description = "Tracks how complete your Steam item collection is"
 edition = "2021"
 publish = false

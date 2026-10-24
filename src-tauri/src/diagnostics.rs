@@ -721,8 +721,8 @@ pub async fn run(
         },
     }
 
-    // 8. Price history from the newer Market, which works without sign-in,
-    // and how much of it comes over the wire.
+    // 8. Price history from the newer Market, read without sign-in as the
+    // app does, and how much of it comes over the wire.
     let t = run.start("price_history_new");
     match sample_hash.as_deref() {
         None => run.finish(
@@ -732,7 +732,7 @@ pub async fn run(
             "Skipped because the market search didn't return an item.",
             Value::Null,
         ),
-        Some(hash) => match steam.market_history(hash, cookie.as_deref(), notify).await {
+        Some(hash) => match steam.market_history(hash, None, notify).await {
             Ok(f) if f.skipped => run.finish(
                 "price_history_new",
                 t,
@@ -750,12 +750,7 @@ pub async fn run(
                 let url =
                     crate::steam::market_action_url("/market/actions", "QueryPriceHistory", hash);
                 let size = steam
-                    .transfer_size(
-                        Bucket::Market,
-                        &url,
-                        cookie.as_deref(),
-                        crate::steam::QUERY_ACTION,
-                    )
+                    .transfer_size(Bucket::Market, &url, None, crate::steam::QUERY_ACTION)
                     .await
                     .ok();
                 if let (Value::Object(map), Some((status, wire, encoding))) = (&mut detail, &size) {
@@ -781,7 +776,7 @@ pub async fn run(
                             t,
                             StepStatus::Ok,
                             format!(
-                                "Price history works{signed_note}: {} sale points over {} days for \"{hash}\", in {}.{wire}",
+                                "Price history works without sign-in: {} sale points over {} days for \"{hash}\", in {}.{wire}",
                                 fmt_num(points.len() as u64),
                                 fmt_num(days as u64),
                                 crate::market::currency_code(currency).unwrap_or("an unknown currency")

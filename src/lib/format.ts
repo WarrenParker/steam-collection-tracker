@@ -128,6 +128,16 @@ export function day(unixSeconds: number | null | undefined): string {
   });
 }
 
+/** "Mar 4, 2021" for a moment, in the computer's own time zone. */
+export function localDay(unixSeconds: number | null | undefined): string {
+  if (!unixSeconds) return '';
+  return new Date(unixSeconds * 1000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 /** "3 hours ago" for a Unix time. */
 export function agoUnix(unixSeconds: number | null | undefined): string {
   if (!unixSeconds) return '';

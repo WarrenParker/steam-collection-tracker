@@ -15,7 +15,7 @@
     type ScanSummary,
     type SettingsView,
   } from './api';
-  import { ago, agoUnix, change, clock, day, duration, money, num, owned, pct, points, roughly } from './format';
+  import { ago, agoUnix, change, clock, duration, localDay, money, num, owned, pct, points, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
@@ -152,7 +152,7 @@
   const changeDays = $derived.by(() => {
     const days: { label: string; rows: DashChange[] }[] = [];
     for (const c of dash?.changes ?? []) {
-      const label = day(c.at);
+      const label = localDay(c.at);
       const last = days[days.length - 1];
       if (last && last.label === label) last.rows.push(c);
       else days.push({ label, rows: [c] });
@@ -342,7 +342,7 @@
             <span class="card-trend">
               <svg viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"><polyline points={trend.line} /></svg>
               {#if trend.percent !== null && Math.abs(trend.percent) >= 0.05}
-                <span class:up={trend.percent > 0}>{signed(trend.percent, `${Math.abs(trend.percent).toFixed(1)} pts`)} since {day(trend.since)}</span>
+                <span class:up={trend.percent > 0}>{signed(trend.percent, `${Math.abs(trend.percent).toFixed(1)} pts`)} since {localDay(trend.since)}</span>
               {/if}
             </span>
           {/if}
@@ -358,7 +358,7 @@
             <span class="card-value">{money(prices.value, cur)}</span>
             <span class="card-sub">{num(prices.value_copies)} items you could sell · {points(prices.points_value)} that can't be sold</span>
             {#if trend?.value}
-              <span class="card-trend"><span class:up={trend.value > 0}>{signed(trend.value, money(Math.abs(trend.value), cur))} since {day(trend.since)}</span></span>
+              <span class="card-trend"><span class:up={trend.value > 0}>{signed(trend.value, money(Math.abs(trend.value), cur))} since {localDay(trend.since)}</span></span>
             {/if}
           </button>
 
@@ -373,7 +373,7 @@
               {#if prices.cost_points > 0}+ {points(prices.cost_points)} in the Points Shop{/if}{#if prices.unpriced > 0}{prices.cost_points > 0 ? ' · ' : ''}{num(prices.unpriced)} not for sale right now{/if}
             </span>
             {#if trend?.cost}
-              <span class="card-trend"><span class:up={trend.cost < 0}>{signed(trend.cost, money(Math.abs(trend.cost), cur))} since {day(trend.since)}</span></span>
+              <span class="card-trend"><span class:up={trend.cost < 0}>{signed(trend.cost, money(Math.abs(trend.cost), cur))} since {localDay(trend.since)}</span></span>
             {/if}
           </button>
         {:else}
