@@ -109,6 +109,7 @@
   const upIsGood = $derived(metric !== 'cost');
 
   function deltaText(d: number): string {
+    if (Math.abs(d) < (metric === 'percent' ? 0.05 : 0.5)) return 'No change';
     const sign = d > 0 ? '+' : d < 0 ? '−' : '';
     const abs = Math.abs(d);
     if (metric === 'percent') return `${sign}${(Math.round(abs * 10) / 10).toFixed(1)} points`;
@@ -136,7 +137,7 @@
   {#if all === null}
     <p class="muted">Loading…</p>
   {:else if !chart}
-    <p class="muted">
+    <p class="muted progress-empty">
       {metric === 'items'
         ? 'Items owned are recorded from version 0.9.0 on. The chart fills in after your next scans.'
         : 'Nothing recorded for this span yet. The app records your figures once a day, after a scan.'}
@@ -189,7 +190,7 @@
       </div>
       <figcaption>
         <span>{localDay(chart.first.p.at)}</span>
-        <span>{label(chart.lo, metric)} to {label(chart.hi, metric)}</span>
+        <span>{chart.lo === chart.hi ? label(chart.lo, metric) : `${label(chart.lo, metric)} to ${label(chart.hi, metric)}`}</span>
         <span>{localDay(chart.last.p.at)}</span>
       </figcaption>
     </figure>
@@ -199,6 +200,14 @@
 <style>
   .progress-card {
     margin-bottom: 14px;
+  }
+
+  .progress-empty {
+    display: grid;
+    place-items: center;
+    min-height: 200px;
+    margin: 0;
+    text-align: center;
   }
 
   .progress-head {

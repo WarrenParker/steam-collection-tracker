@@ -268,6 +268,13 @@ pub fn save_banner(
     Ok(path.display().to_string())
 }
 
+/// Copies a banner the interface drew to the clipboard.
+#[tauri::command]
+pub fn copy_banner(png: String) -> Result<(), String> {
+    let bytes = crate::banner::decode_png(&png)?;
+    crate::clipboard::copy_png(&bytes)
+}
+
 /// Every day's account figures, oldest first, for the progress chart.
 #[tauri::command]
 pub fn get_progress(

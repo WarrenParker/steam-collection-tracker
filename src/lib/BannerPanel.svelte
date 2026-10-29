@@ -173,7 +173,7 @@
 
     // Completion.
     const left = wide ? 800 : s.w - 2 * pad;
-    const bigY = wide ? 292 : 400;
+    const bigY = wide ? 280 : 360;
     ctx.fillStyle = c.text;
     ctx.font = `600 ${wide ? 112 : 160}px ${DISPLAY}`;
     const big = pct(d.percent);
@@ -184,14 +184,15 @@
     ctx.fillText('complete', pad + bw + 16, bigY);
     ctx.font = `400 ${wide ? 22 : 26}px ${TEXT}`;
     ctx.fillStyle = c.text2;
-    const sub = `${num(d.complete)} of ${num(d.total)} items · average game ${pct(d.game_average)} · ${num(d.card_sets_complete)} card sets done`;
+    const sets = d.card_sets_complete > 0 ? ` · ${num(d.card_sets_complete)} card ${d.card_sets_complete === 1 ? 'set' : 'sets'} done` : '';
+    const sub = `${num(d.complete)} of ${num(d.total)} items · average game ${pct(d.game_average)}${sets}`;
     ctx.fillText(fit(ctx, sub, left), pad, bigY + (wide ? 42 : 52));
     bar(ctx, c, pad, bigY + (wide ? 64 : 80), left, wide ? 14 : 16, d.percent ?? 0);
 
     // Figures.
     const list = stats(d);
     if (wide) {
-      const y = 430;
+      const y = 408;
       const cell = left / list.length;
       list.forEach((st, i) => {
         const x = pad + i * cell;
@@ -203,7 +204,7 @@
         ctx.fillText(fit(ctx, st.value, cell - 12), x, y + 36);
       });
     } else {
-      const y0 = 590;
+      const y0 = 530;
       const cell = left / 3;
       list.forEach((st, i) => {
         const x = pad + (i % 3) * cell;
@@ -220,7 +221,7 @@
       ctx.fillStyle = c.text3;
       ctx.font = `400 ${wide ? 15 : 20}px ${TEXT}`;
       const note = `To complete also needs ${points(d.cost_points)}.`;
-      ctx.fillText(note, pad, wide ? s.h - 18 : 812);
+      ctx.fillText(note, pad, wide ? s.h - 22 : 716);
     }
 
     // Closest to complete.
@@ -250,7 +251,7 @@
         bar(ctx, c, tx, y + 82, gw - aw - 22, 8, g.percent ?? 0);
       });
     } else {
-      const gy = 870;
+      const gy = 772;
       ctx.font = `500 22px ${TEXT}`;
       ctx.fillText('Closest to complete', pad, gy);
       if (!games.length) {
@@ -309,13 +310,10 @@
     error = '';
     message = '';
     try {
-      const blob = await new Promise<Blob>((ok, fail) =>
-        canvas!.toBlob((b) => (b ? ok(b) : fail(new Error('no image'))), 'image/png'),
-      );
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      await api.copyBanner(canvas.toDataURL('image/png'));
       message = 'Copied. Paste it into a chat or post.';
-    } catch {
-      error = "The banner couldn't be copied. Save it instead.";
+    } catch (e) {
+      error = errorText(e);
     }
   }
 </script>
@@ -323,7 +321,7 @@
 <svelte:window {onkeydown} />
 
 <div class="scrim" onclick={onclose} role="presentation"></div>
-<aside class="drawer wide" role="dialog" aria-modal="true" aria-label="Banner">
+<aside class="drawer wide banner-drawer" role="dialog" aria-modal="true" aria-label="Banner">
   <header class="drawer-head">
     <h2>Banner</h2>
     <button class="btn ghost icon-btn" onclick={onclose} aria-label="Close">
@@ -367,6 +365,10 @@
 </aside>
 
 <style>
+  .drawer.banner-drawer {
+    width: min(980px, 94vw);
+  }
+
   .banner-options {
     display: flex;
     flex-wrap: wrap;
@@ -393,7 +395,7 @@
   }
 
   .banner-preview.square {
-    max-width: 520px;
+    max-width: 560px;
   }
 
   .banner-preview canvas {
