@@ -15,6 +15,7 @@ mod scan;
 mod secret;
 mod session;
 mod settings;
+mod shared_prices;
 mod state;
 mod steam;
 mod updater;
@@ -77,6 +78,10 @@ pub fn run() {
             commands::install_version,
             commands::sign_in,
             commands::sign_out,
+            commands::save_github_token,
+            commands::clear_github_token,
+            commands::get_shared_prices,
+            commands::publish_prices_now,
         ])
         .setup(move |app| {
             // The window starts hidden and the interface shows it once it has drawn,

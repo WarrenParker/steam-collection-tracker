@@ -68,6 +68,12 @@ pub struct Settings {
     pub spike_percent: u32,
     /// And by at least this many cents, so a 3-cent card moving a cent isn't flagged.
     pub spike_min_cents: u32,
+    /// Take prices from the shared price file before asking Steam.
+    pub shared_prices: bool,
+    /// A GitHub token that publishes the shared price file, encrypted like
+    /// the API key. Only the owner's copy has one.
+    pub github_token_protected: Option<String>,
+    pub github_token_hint: Option<String>,
 }
 
 impl Default for Settings {
@@ -85,6 +91,9 @@ impl Default for Settings {
             price_window: PriceWindow::Month,
             spike_percent: SPIKE_PERCENT,
             spike_min_cents: SPIKE_MIN_CENTS,
+            shared_prices: true,
+            github_token_protected: None,
+            github_token_hint: None,
         }
     }
 }
@@ -104,6 +113,35 @@ pub struct SettingsView {
     pub price_window: PriceWindow,
     pub spike_percent: u32,
     pub spike_min_cents: u32,
+    pub shared_prices: bool,
+    pub publishing_prices: bool,
+    pub github_token_hint: Option<String>,
+}
+
+/// Encrypts a secret for the current Windows user, with its last four
+/// characters so the user can recognise it.
+fn seal(secret_text: &str) -> Result<(String, String), String> {
+    let sealed = secret::protect(secret_text.as_bytes())?;
+    let hint: String = secret_text
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    Ok((hexutil::encode(&sealed), hint))
+}
+
+fn unseal(hex: Option<&str>, damaged: &str) -> Result<Option<String>, String> {
+    let Some(hex) = hex else {
+        return Ok(None);
+    };
+    let sealed = hexutil::decode(hex).ok_or_else(|| damaged.to_string())?;
+    let plain = secret::unprotect(&sealed)?;
+    String::from_utf8(plain)
+        .map(Some)
+        .map_err(|_| damaged.to_string())
 }
 
 impl Settings {
@@ -129,31 +167,40 @@ impl Settings {
     }
 
     pub fn set_api_key(&mut self, key: &str) -> Result<(), String> {
-        let sealed = secret::protect(key.as_bytes())?;
-        self.api_key_protected = Some(hexutil::encode(&sealed));
-        let hint: String = key
-            .chars()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        let (sealed, hint) = seal(key)?;
+        self.api_key_protected = Some(sealed);
         self.api_key_hint = Some(hint);
         Ok(())
     }
 
     pub fn api_key(&self) -> Result<Option<String>, String> {
-        let Some(hex) = &self.api_key_protected else {
-            return Ok(None);
-        };
-        let sealed = hexutil::decode(hex).ok_or_else(|| {
-            "Your saved API key is damaged. Enter it again in Settings.".to_string()
-        })?;
-        let plain = secret::unprotect(&sealed)?;
-        String::from_utf8(plain)
-            .map(Some)
-            .map_err(|_| "Your saved API key is damaged. Enter it again in Settings.".to_string())
+        unseal(
+            self.api_key_protected.as_deref(),
+            "Your saved API key is damaged. Enter it again in Settings.",
+        )
+    }
+
+    pub fn set_github_token(&mut self, token: &str) -> Result<(), String> {
+        let (sealed, hint) = seal(token)?;
+        self.github_token_protected = Some(sealed);
+        self.github_token_hint = Some(hint);
+        Ok(())
+    }
+
+    pub fn clear_github_token(&mut self) {
+        self.github_token_protected = None;
+        self.github_token_hint = None;
+    }
+
+    pub fn github_token(&self) -> Result<Option<String>, String> {
+        unseal(
+            self.github_token_protected.as_deref(),
+            "Your saved GitHub token is damaged. Enter it again in Settings.",
+        )
+    }
+
+    pub fn has_github_token(&self) -> bool {
+        matches!(self.github_token(), Ok(Some(_)))
     }
 
     pub fn view(&self) -> SettingsView {
@@ -170,6 +217,9 @@ impl Settings {
             price_window: self.price_window,
             spike_percent: self.spike_percent,
             spike_min_cents: self.spike_min_cents,
+            shared_prices: self.shared_prices,
+            publishing_prices: self.has_github_token(),
+            github_token_hint: self.github_token_hint.clone(),
         }
     }
 }
@@ -188,6 +238,23 @@ mod tests {
         assert!(!s.keep_card_set);
         assert_eq!(s.price_window, PriceWindow::Month);
         assert_eq!((s.spike_percent, s.spike_min_cents), (25, 5));
+        assert!(s.shared_prices);
+        assert!(!s.has_github_token());
+    }
+
+    #[test]
+    fn github_token_round_trip() {
+        let mut s = Settings::default();
+        s.set_github_token("github_pat_11AAAAexample0123").unwrap();
+        assert_eq!(
+            s.github_token().unwrap().as_deref(),
+            Some("github_pat_11AAAAexample0123")
+        );
+        assert_eq!(s.github_token_hint.as_deref(), Some("0123"));
+        assert!(s.view().publishing_prices);
+        s.clear_github_token();
+        assert!(!s.view().publishing_prices);
+        assert!(s.github_token_hint.is_none());
     }
 
     #[test]

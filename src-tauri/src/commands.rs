@@ -14,6 +14,7 @@ use crate::profile_input::{self, ProfileRef};
 use crate::scan::{self, ScanStatus, ScanSummary, PRIVATE_GAMES, PRIVATE_PROFILE};
 use crate::session;
 use crate::settings::{PriceWindow, SettingsView, Theme};
+use crate::shared_prices;
 use crate::state::AppState;
 use crate::steam::ProfileView;
 use crate::updater::{self, UpdateState, VersionList};
@@ -37,6 +38,7 @@ pub struct PreferencesPatch {
     auto_update: Option<bool>,
     include_family: Option<bool>,
     keep_card_set: Option<bool>,
+    shared_prices: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -95,8 +97,14 @@ pub fn update_preferences(
         if let Some(keep) = patch.keep_card_set {
             s.keep_card_set = keep;
         }
+        if let Some(shared) = patch.shared_prices {
+            s.shared_prices = shared;
+        }
         Ok(())
     })?;
+    if patch.shared_prices == Some(true) {
+        shared_prices::check_again(&state);
+    }
     let _ = window.set_theme(Some(updated.theme.window_theme()));
     Ok(updated.view())
 }
@@ -118,6 +126,49 @@ pub async fn save_api_key(state: State<'_, AppState>, key: String) -> Result<Set
     state.steam.check_api_key(&key, &quiet).await?;
     let updated = state.update_settings(|s| s.set_api_key(&key))?;
     Ok(updated.view())
+}
+
+/// Saves the GitHub token that publishes the shared price file, after
+/// checking it can publish there.
+#[tauri::command]
+pub async fn save_github_token(
+    state: State<'_, AppState>,
+    token: String,
+) -> Result<SettingsView, String> {
+    let token: String = token.chars().filter(|c| !c.is_whitespace()).collect();
+    let looks_right = (token.starts_with("github_pat_") || token.starts_with("ghp_"))
+        && token.len() <= 255
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !looks_right {
+        return Err(
+            "That doesn't look like a GitHub token. Tokens start with github_pat_ or ghp_."
+                .to_string(),
+        );
+    }
+    shared_prices::check_token(state.steam.http(), &token).await?;
+    let updated = state.update_settings(|s| s.set_github_token(&token))?;
+    Ok(updated.view())
+}
+
+#[tauri::command]
+pub fn clear_github_token(state: State<'_, AppState>) -> Result<SettingsView, String> {
+    let updated = state.update_settings(|s| {
+        s.clear_github_token();
+        Ok(())
+    })?;
+    Ok(updated.view())
+}
+
+#[tauri::command]
+pub fn get_shared_prices(state: State<'_, AppState>) -> shared_prices::Status {
+    shared_prices::status(&state)
+}
+
+#[tauri::command]
+pub async fn publish_prices_now(
+    state: State<'_, AppState>,
+) -> Result<shared_prices::Status, String> {
+    shared_prices::publish_now(&state).await
 }
 
 #[tauri::command]

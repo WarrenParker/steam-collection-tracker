@@ -26,6 +26,20 @@ export interface SettingsView {
   signed_in: boolean;
   include_family: boolean;
   keep_card_set: boolean;
+  shared_prices: boolean;
+  publishing_prices: boolean;
+  github_token_hint: string | null;
+}
+
+/** The shared price file: what this copy took from it, or published. */
+export interface SharedPrices {
+  repo: string | null;
+  enabled: boolean;
+  publishing: boolean;
+  checked_at: number | null;
+  used: { made_at: number; games: number; items: number } | null;
+  published: { at: number; games: number; items: number; bytes: number } | null;
+  error: string | null;
 }
 
 export interface AppInfo {
@@ -432,7 +446,12 @@ export const api = {
     auto_update?: boolean;
     include_family?: boolean;
     keep_card_set?: boolean;
+    shared_prices?: boolean;
   }) => invoke<SettingsView>('update_preferences', { patch }),
+  saveGithubToken: (token: string) => invoke<SettingsView>('save_github_token', { token }),
+  clearGithubToken: () => invoke<SettingsView>('clear_github_token'),
+  sharedPrices: () => invoke<SharedPrices>('get_shared_prices'),
+  publishPricesNow: () => invoke<SharedPrices>('publish_prices_now'),
   saveApiKey: (key: string) => invoke<SettingsView>('save_api_key', { key }),
   setProfile: (input: string) => invoke<ProfileCheck>('set_profile', { input }),
   startScan: (resume = false) => invoke<ScanStatus>('start_scan', { resume }),
