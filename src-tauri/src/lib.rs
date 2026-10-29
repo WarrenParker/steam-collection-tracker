@@ -1,3 +1,4 @@
+mod banner;
 mod catalog;
 mod commands;
 mod completion;
@@ -82,6 +83,8 @@ pub fn run() {
             commands::clear_github_token,
             commands::get_shared_prices,
             commands::get_progress,
+            commands::get_banner,
+            commands::save_banner,
             commands::publish_prices_now,
         ])
         .setup(move |app| {

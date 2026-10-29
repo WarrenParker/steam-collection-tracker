@@ -259,6 +259,27 @@ export interface ProgressPoint {
   items_owned: number | null;
 }
 
+export interface BannerData {
+  name: string;
+  avatar: string | null;
+  percent: number | null;
+  complete: number;
+  total: number;
+  items_owned: number;
+  game_average: number | null;
+  currency: string;
+  priced: boolean;
+  value: number;
+  cost: number;
+  cost_points: number;
+  badges: number;
+  card_sets_complete: number;
+  ach_average: number | null;
+  ach_perfect: number;
+  ach_unlocked: number;
+  games: { appid: number; name: string; percent: number | null; art: string | null }[];
+}
+
 export interface Dashboard {
   closest: GameRow[];
   cheapest: GameRow[];
@@ -466,6 +487,8 @@ export const api = {
   items: () => invoke<ItemsView>('get_items'),
   dashboard: () => invoke<Dashboard>('get_dashboard'),
   progress: () => invoke<ProgressPoint[]>('get_progress'),
+  banner: () => invoke<BannerData>('get_banner'),
+  saveBanner: (png: string, shape: string) => invoke<string>('save_banner', { png, shape }),
   item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),

@@ -159,6 +159,115 @@ pub fn clear_github_token(state: State<'_, AppState>) -> Result<SettingsView, St
     Ok(updated.view())
 }
 
+#[derive(Serialize)]
+pub struct BannerGame {
+    appid: u64,
+    name: String,
+    percent: Option<f64>,
+    /// The game's store picture as a data URL, when it could be read.
+    art: Option<String>,
+}
+
+/// Everything the banner shows. Pictures are data URLs so the drawn banner
+/// can be saved.
+#[derive(Serialize)]
+pub struct BannerData {
+    name: String,
+    avatar: Option<String>,
+    percent: Option<f64>,
+    complete: u64,
+    total: u64,
+    items_owned: u64,
+    game_average: Option<f64>,
+    currency: String,
+    priced: bool,
+    value: i64,
+    cost: i64,
+    cost_points: i64,
+    badges: u64,
+    card_sets_complete: u64,
+    ach_average: Option<f64>,
+    ach_perfect: u64,
+    ach_unlocked: u64,
+    games: Vec<BannerGame>,
+}
+
+#[tauri::command]
+pub async fn get_banner(state: State<'_, AppState>) -> Result<BannerData, String> {
+    let settings = state.settings();
+    let profile = settings
+        .profile
+        .clone()
+        .ok_or_else(|| "Add your Steam profile first.".to_string())?;
+    let snap = state.snapshot(rules(&state))?;
+    let a = &snap.account;
+    let (counts, badges) = state.db.read(|c| {
+        Ok((
+            db::catalog_counts(c, settings.include_family)?,
+            c.query_row("SELECT COUNT(*) FROM badges WHERE level > 0", [], |r| {
+                r.get::<_, i64>(0)
+            })?,
+        ))
+    })?;
+    let closest = get_dashboard(state.clone())?.closest;
+    let http = state.steam.http();
+    let avatar = match &profile.avatar_url {
+        Some(url) => crate::banner::image(http, url).await,
+        None => None,
+    };
+    let mut games = Vec::new();
+    for g in closest.into_iter().take(3) {
+        let art = crate::banner::image(http, &crate::banner::game_art_url(g.appid)).await;
+        games.push(BannerGame {
+            appid: g.appid,
+            name: g.name,
+            percent: g.percent,
+            art,
+        });
+    }
+    Ok(BannerData {
+        name: profile.persona_name,
+        avatar,
+        percent: a.percent,
+        complete: a.complete,
+        total: a.total,
+        items_owned: a.items_owned,
+        game_average: a.game_average,
+        currency: a.currency.clone(),
+        priced: a.prices_at.is_some(),
+        value: a.prices.value,
+        cost: a.prices.cost,
+        cost_points: a.prices.cost_points,
+        badges: badges.max(0) as u64,
+        card_sets_complete: a.card_sets_complete,
+        ach_average: counts.ach_average,
+        ach_perfect: counts.ach_perfect,
+        ach_unlocked: counts.ach_unlocked,
+        games,
+    })
+}
+
+/// Saves a banner the interface drew to the user's Pictures folder and
+/// shows it there. Returns where it went.
+#[tauri::command]
+pub fn save_banner(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    png: String,
+    shape: String,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let bytes = crate::banner::decode_png(&png)?;
+    let folder = crate::banner::folder(app.path().picture_dir().ok(), &state.paths.root);
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| format!("Couldn't make the folder for banners: {e}"))?;
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let path = folder.join(crate::banner::file_name(&date, &shape));
+    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save the banner: {e}"))?;
+    let _ = tauri_plugin_opener::reveal_item_in_dir(&path);
+    Ok(path.display().to_string())
+}
+
 /// Every day's account figures, oldest first, for the progress chart.
 #[tauri::command]
 pub fn get_progress(

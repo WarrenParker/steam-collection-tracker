@@ -26,6 +26,8 @@ The app is in early development. It reads your profile, games, badges and invent
 - Shows how complete each game and your whole account is, what your items are worth, and what finishing would cost on the Market and in the Points Shop.
 - Every item in one fast, sortable list with filters, an art grid for each game, and Ctrl+K search across games and items.
 - Scans in the background, and can pause and pick up where it left off.
+- Starts from a shared daily price file, so most prices arrive in seconds instead of hours.
+- A progress chart over time, and a banner image of your progress to share.
 - Optional sign-in through Steam's own page, so the app can read your inventory and Points Shop items.
 - Greyscale, dark and light themes.
 
@@ -47,7 +49,7 @@ Signing in with Steam is optional but recommended. Steam only shares your invent
 
 ## Privacy
 
-Everything stays on your PC. Your API key is encrypted for your Windows account, and sign-in happens on Steam's own page, so the app never sees your password. The app only talks to Steam, and to GitHub to check for updates.
+Everything stays on your PC. Your API key is encrypted for your Windows account, and sign-in happens on Steam's own page, so the app never sees your password. The app only talks to Steam, to GitHub for updates and the shared price file, and to Frankfurter for exchange rates when you pick another currency. Nothing about you is uploaded unless you publish prices yourself; the published file holds Market prices only, though its list of games shows which games your app priced.
 
 ## Building from source
 
