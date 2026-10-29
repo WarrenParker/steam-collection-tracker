@@ -392,7 +392,7 @@
         {/if}
       </div>
 
-      <ProgressChart />
+      <ProgressChart stamp={dash} />
 
       {#if dash}
         <div class="dash-grid">

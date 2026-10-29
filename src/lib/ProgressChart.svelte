@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api, type ProgressPoint } from './api';
   import { localDay, money, num, pct, points } from './format';
 
@@ -24,11 +23,15 @@
   let range = $state<Range>(90);
   let hover = $state<number | null>(null);
 
-  onMount(() => {
+  /** Changes whenever the dashboard reloads, for example after a scan, so the chart does too. */
+  let { stamp = null }: { stamp?: unknown } = $props();
+
+  $effect(() => {
+    void stamp;
     api
       .progress()
       .then((p) => (all = p))
-      .catch(() => (all = []));
+      .catch(() => (all = all ?? []));
   });
 
   /** The currency of the newest priced day; older days in another one are left out. */
