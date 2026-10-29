@@ -39,6 +39,8 @@ pub struct ProgressPoint {
     pub percent: Option<f64>,
     pub complete: u64,
     pub total: u64,
+    /// Missing for days recorded before 0.9.0.
+    pub items_owned: Option<u64>,
     pub game_average: Option<f64>,
     pub currency: String,
     pub value: Option<i64>,
@@ -147,8 +149,9 @@ fn record_progress(tx: &Transaction<'_>, a: &AccountCompletion, now: i64) -> rus
     let priced = a.prices_at.is_some();
     tx.execute(
         "INSERT OR REPLACE INTO progress
-             (day, at, percent, owned, complete, total, game_average, currency, value, cost, cost_points)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             (day, at, percent, owned, complete, total, game_average, currency, value, cost, cost_points,
+              items_owned)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             local_day(now),
             now,
@@ -161,6 +164,7 @@ fn record_progress(tx: &Transaction<'_>, a: &AccountCompletion, now: i64) -> rus
             priced.then_some(a.prices.value),
             priced.then_some(a.prices.cost),
             priced.then_some(a.prices.cost_points),
+            a.items_owned as i64,
         ],
     )?;
     Ok(())
@@ -188,7 +192,8 @@ pub fn recent_changes(c: &Connection, limit: u32) -> rusqlite::Result<Vec<Change
 /// The account's figures, one point a day, oldest first, since `since`.
 pub fn progress(c: &Connection, since: i64) -> rusqlite::Result<Vec<ProgressPoint>> {
     let mut st = c.prepare(
-        "SELECT at, percent, complete, total, game_average, currency, value, cost, cost_points
+        "SELECT at, percent, complete, total, game_average, currency, value, cost, cost_points,
+             items_owned
          FROM progress WHERE at >= ?1 ORDER BY day",
     )?;
     let rows = st.query_map([since], |r| {
@@ -202,6 +207,7 @@ pub fn progress(c: &Connection, since: i64) -> rusqlite::Result<Vec<ProgressPoin
             value: r.get(6)?,
             cost: r.get(7)?,
             cost_points: r.get(8)?,
+            items_owned: r.get::<_, Option<i64>>(9)?.map(|n| n.max(0) as u64),
         })
     })?;
     rows.collect()

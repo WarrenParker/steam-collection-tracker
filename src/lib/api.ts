@@ -255,6 +255,8 @@ export interface ProgressPoint {
   value: number | null;
   cost: number | null;
   cost_points: number | null;
+  /** Missing for days recorded before 0.9.0. */
+  items_owned: number | null;
 }
 
 export interface Dashboard {
@@ -463,6 +465,7 @@ export const api = {
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
   items: () => invoke<ItemsView>('get_items'),
   dashboard: () => invoke<Dashboard>('get_dashboard'),
+  progress: () => invoke<ProgressPoint[]>('get_progress'),
   item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),

@@ -18,6 +18,7 @@
   import { ago, agoUnix, change, clock, duration, localDay, money, num, owned, pct, points, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
+  import ProgressChart from './ProgressChart.svelte';
   import SignInButton from './SignInButton.svelte';
   import { nav, openGame, openItem, showItems } from './nav.svelte.ts';
 
@@ -383,6 +384,8 @@
           </div>
         {/if}
       </div>
+
+      <ProgressChart />
 
       {#if dash}
         <div class="dash-grid">

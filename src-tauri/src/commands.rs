@@ -159,6 +159,14 @@ pub fn clear_github_token(state: State<'_, AppState>) -> Result<SettingsView, St
     Ok(updated.view())
 }
 
+/// Every day's account figures, oldest first, for the progress chart.
+#[tauri::command]
+pub fn get_progress(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::history::ProgressPoint>, String> {
+    state.db.read(|c| crate::history::progress(c, 0))
+}
+
 #[tauri::command]
 pub fn get_shared_prices(state: State<'_, AppState>) -> shared_prices::Status {
     shared_prices::status(&state)

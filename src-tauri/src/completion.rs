@@ -370,6 +370,8 @@ pub struct GameCompletion {
     pub owned: f64,
     pub complete: u64,
     pub total: u64,
+    /// Counted items the user has at least one copy of.
+    pub items_owned: u64,
     pub groups: Vec<GroupProgress>,
     /// Items left out of the percentage because they can't be had.
     pub unobtainable: u64,
@@ -392,6 +394,8 @@ pub struct AccountCompletion {
     pub owned: f64,
     pub complete: u64,
     pub total: u64,
+    /// Counted items the user has at least one copy of.
+    pub items_owned: u64,
     /// Every counted game weighs the same.
     pub game_average: Option<f64>,
     /// Counted games that have any items.
@@ -941,6 +945,9 @@ pub fn compute(c: &Connection, rules: Rules, now: i64) -> rusqlite::Result<Snaps
             if item.have >= item.needed {
                 g.complete += 1;
             }
+            if item.have > 0 {
+                g.items_owned += 1;
+            }
         }
     }
     for (appid, g) in games.iter_mut() {
@@ -997,6 +1004,7 @@ pub fn compute(c: &Connection, rules: Rules, now: i64) -> rusqlite::Result<Snaps
         account.total += g.total;
         account.owned += g.owned;
         account.complete += g.complete;
+        account.items_owned += g.items_owned;
         if g.owned > 0.0 {
             account.games_started += 1;
         }

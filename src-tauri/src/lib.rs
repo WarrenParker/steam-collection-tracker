@@ -81,6 +81,7 @@ pub fn run() {
             commands::save_github_token,
             commands::clear_github_token,
             commands::get_shared_prices,
+            commands::get_progress,
             commands::publish_prices_now,
         ])
         .setup(move |app| {
