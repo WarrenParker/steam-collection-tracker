@@ -32,8 +32,8 @@ pub const FILE_NAME: &str = "prices.txt.gz";
 const UPLOAD_NAME: &str = "prices.next.txt.gz";
 
 /// Size limits for a downloaded file, compressed and not.
-const MAX_DOWNLOAD: usize = 32 << 20;
-const MAX_TEXT: u64 = 256 << 20;
+const MAX_DOWNLOAD: usize = 16 << 20;
+const MAX_TEXT: u64 = 64 << 20;
 
 /// How often a copy looks for a newer file.
 const CHECK_EVERY: i64 = 6 * 3600;

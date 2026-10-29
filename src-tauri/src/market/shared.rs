@@ -24,8 +24,10 @@ pub const MAGIC: &str = "steam-collection-tracker prices";
 pub const VERSION: u32 = 1;
 
 /// Limits on what a file may hold.
-pub const MAX_GAMES: usize = 100_000;
-pub const MAX_ROWS: usize = 1_000_000;
+/// About 20 times a large library, and small enough that a hostile file
+/// can't use much memory.
+pub const MAX_GAMES: usize = 20_000;
+pub const MAX_ROWS: usize = 100_000;
 const MAX_TEXT: usize = 2_048;
 const MAX_BLOB: usize = 65_536;
 
