@@ -1,5 +1,6 @@
 mod banner;
 mod catalog;
+mod clipboard;
 mod commands;
 mod completion;
 mod db;
@@ -85,6 +86,7 @@ pub fn run() {
             commands::get_progress,
             commands::get_banner,
             commands::save_banner,
+            commands::copy_banner,
             commands::publish_prices_now,
         ])
         .setup(move |app| {

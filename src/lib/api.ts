@@ -489,6 +489,7 @@ export const api = {
   progress: () => invoke<ProgressPoint[]>('get_progress'),
   banner: () => invoke<BannerData>('get_banner'),
   saveBanner: (png: string, shape: string) => invoke<string>('save_banner', { png, shape }),
+  copyBanner: (png: string) => invoke<void>('copy_banner', { png }),
   item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),

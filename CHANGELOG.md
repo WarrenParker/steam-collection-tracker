@@ -2,6 +2,15 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.9.1] - 2026-10-28
+
+### Fixed
+
+- **Copy image** on the banner now copies the picture. The app's window couldn't write pictures to the clipboard itself, so the engine does it, as a PNG and as a plain bitmap so it pastes anywhere.
+- The square banner fits its three games and their progress bars.
+- The banner panel is wider, so the preview is easier to check.
+- The progress chart says "No change" instead of "+0.0 points", and its label shows one figure when the line is flat.
+
 ## [0.9.0] - 2026-10-28
 
 ### Added
