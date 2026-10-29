@@ -2,7 +2,7 @@
 
 The plan for Steam Collection Tracker, phase by phase. Finished items link to the version that shipped them in the [changelog](../CHANGELOG.md). Ideas that aren't scheduled yet are in [IDEAS.md](IDEAS.md).
 
-**Now:** version 0.8.5. Phase 4 is done; Phase 5 is next.
+**Now:** version 0.9.0. Phase 5 is done; Phase 6 is next.
 
 ## Goal
 
@@ -62,11 +62,11 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - ✅ Fine-tuning from testing on a real account, security hardening and dependency audits. [0.8.1 to 0.8.5](../CHANGELOG.md#085---2026-10-24)
 - ✅ Price history read when an item is opened, after Steam refused the app's bulk reads. [0.8.4](../CHANGELOG.md#084---2026-10-24) Steam refuses single reads too for now; see the idea board.
 
-## Phase 5: Shared prices, history and banner
+## Phase 5: Shared prices, history and banner (done)
 
-- ⬜ Shared price file. The owner's app publishes the prices and price history it reads as one small file on GitHub each day, and every copy of the app downloads it first, so it only asks Steam for what the file doesn't cover.
-- ⬜ Progress-over-time chart for your account.
-- ⬜ Banner generator that exports a PNG of your progress and stats.
+- ✅ Shared price file. The owner's app publishes the prices, price history and order books it reads as one small file on a GitHub release each day, in a separate prices repository, and every copy of the app downloads it first, so it only asks Steam for what the file doesn't cover. Download only for now; uploads from friends' apps are on the idea board. [0.9.0](../CHANGELOG.md#090---2026-10-28)
+- ✅ Progress-over-time chart for your account: completion, value, cost to complete and items owned, over 30 days, 90 days, a year or everything. [0.9.0](../CHANGELOG.md#090---2026-10-28)
+- ✅ Banner generator that exports a PNG of your progress and stats, wide or square, in any theme. [0.9.0](../CHANGELOG.md#090---2026-10-28)
 
 ## Phase 6: Polish and 1.0
 
@@ -85,4 +85,5 @@ A lightweight Windows app, one exe in one folder with nothing to install, that l
 - **Sign-in is recommended.** Steam refuses inventory and market requests from apps that aren't signed in. Sign-in happens on Steam's own page, and the app never handles the password.
 - **Plain language everywhere.** Every message says what happened and what to do next.
 - **How prices count.** Value counts only copies you can sell, at today's cheapest listing, before fees. Cost to complete uses the cheapest listings (walking up the order book for several copies), points for items only the Points Shop sells, and an item's 90-day average when it's listed at more than three times that. The average price covers 30 days by default.
+- **Shared prices.** One file on a `prices` release in a separate repository, `steam-collection-tracker-prices`, so the token that publishes it can't touch the app's code. The owner's app publishes it at most once a day, and other copies only download it for now.
 - **How completion counts.** Booster packs don't count. Each card needs five copies' worth, from badge levels and copies held. Reward items that can't be bought on their own are tagged Limited and still count unless marked Unobtainable. The account figure covers owned games, plus Steam Family games when that setting is on.
