@@ -2,6 +2,21 @@
 
 All notable changes to Steam Collection Tracker are listed here, newest first. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [semantic versioning](https://semver.org). Versions starting with 0 are early development.
 
+## [0.9.0] - 2026-10-28
+
+### Added
+
+- **Shared prices.** Before reading prices from Steam, the app downloads one small file of Market prices published once a day by the app's owner. Games the file covers with newer prices than yours get them in seconds, and Steam is only asked about the rest. The file can carry price history and order books too, so they reach the app even while Steam refuses the app's own history requests. Turn it off in Settings → Prices.
+- **Publishing prices**, for the app's owner: with a GitHub token for the separate prices repository, the app publishes the file after a scan, at most once a day, or straight away with Publish now.
+- **Progress over time** on the Dashboard: completion, value, cost to complete and items owned, over 30 days, 90 days, a year or everything recorded. Hover for each day's figure.
+- **Banner.** A PNG of your progress to share: your name and avatar, completion, value and cost to complete, badges and achievements, and the three games closest to complete with their art. Wide (1500 × 500) or square (1080 × 1080), in any of the app's themes. It's saved to Pictures\Steam Collection Tracker, or copied to paste anywhere.
+- Each day's figures now include how many items you own.
+
+### Security
+
+- The shared price file is checked strictly before anything in it is used: its size, its format and every value's range. Prices in another currency, and history that can't be read, are skipped.
+- The token that publishes prices is encrypted for your Windows account, like the API key, and only works on the prices repository, never the app's own.
+
 ## [0.8.5] - 2026-10-24
 
 ### Fixed

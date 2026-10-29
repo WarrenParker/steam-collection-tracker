@@ -178,6 +178,9 @@ pub(crate) async fn stages(
     restore_market(state);
     let outcome = run_stages(ctx, family_on, cookie).await;
     save_market(state);
+    if matches!(outcome, Ok(RunEnd::Done { .. })) {
+        crate::shared_prices::after_market(state, ctx.notify).await;
+    }
     outcome
 }
 
@@ -212,9 +215,10 @@ async fn run_stages(
 
     // Stage 5: current prices, game by game.
     data.write(|tx| db::ensure_inventory_apps(tx))?;
+    let currency = data.read(market_currency)?.unwrap_or(1);
+    crate::shared_prices::before_market(state, family_on, currency, notify).await;
     let targets =
         data.read(|c| db::market_targets(c, family_on, db::now() - PRICES_STALE_HOURS * HOUR))?;
-    let currency = data.read(market_currency)?.unwrap_or(1);
     let mut pages_left: u64 = targets
         .iter()
         .map(|a| {

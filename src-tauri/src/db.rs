@@ -335,7 +335,22 @@ fn try_open(path: &Path) -> Result<Connection, String> {
     if version < 5 {
         conn.execute_batch(MIGRATE_V5).map_err(|e| e.to_string())?;
     }
+    add_progress_items_owned(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
+}
+
+/// 0.9.0: `progress.items_owned`. Added without a schema bump, so an older
+/// version installed from Settings can still open the database.
+fn add_progress_items_owned(c: &Connection) -> rusqlite::Result<()> {
+    let has: bool = c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('progress') WHERE name = 'items_owned')",
+        (),
+        |r| r.get(0),
+    )?;
+    if !has {
+        c.execute_batch("ALTER TABLE progress ADD COLUMN items_owned INTEGER;")?;
+    }
+    Ok(())
 }
 
 fn db_error(e: rusqlite::Error) -> String {

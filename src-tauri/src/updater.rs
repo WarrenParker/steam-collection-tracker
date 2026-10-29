@@ -26,6 +26,11 @@ const MAX_UPDATE_BYTES: usize = 100 * 1024 * 1024;
 
 /// Set by the GitHub build ("owner/repo"). Local builds have no updater.
 const REPO: Option<&str> = option_env!("UPDATE_REPO");
+/// The repository updates come from ("owner/repo"), or `None` in local builds.
+pub fn repo() -> Option<&'static str> {
+    REPO
+}
+
 /// The commit this copy was built from, set by the GitHub build.
 const BUILD_SHA: Option<&str> = option_env!("GITHUB_SHA");
 

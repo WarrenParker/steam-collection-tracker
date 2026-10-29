@@ -18,6 +18,8 @@
   import { ago, agoUnix, change, clock, duration, localDay, money, num, owned, pct, points, roughly } from './format';
   import Diagnostics from './Diagnostics.svelte';
   import Icon from './Icon.svelte';
+  import BannerPanel from './BannerPanel.svelte';
+  import ProgressChart from './ProgressChart.svelte';
   import SignInButton from './SignInButton.svelte';
   import { nav, openGame, openItem, showItems } from './nav.svelte.ts';
 
@@ -37,6 +39,7 @@
     onsettings: (s: SettingsView) => void;
   } = $props();
 
+  let bannerOpen = $state(false);
   let scan = $state<ScanSummary | null>(null);
   let completion = $state<AccountCompletion | null>(null);
   let dash = $state<Dashboard | null>(null);
@@ -220,6 +223,11 @@
       <p class="meta">{scannedText}</p>
     </div>
     <div class="head-actions">
+      {#if completion && completion.total > 0}
+        <button class="btn" onclick={() => (bannerOpen = true)} title="Make an image of your progress to share">
+          <Icon name="image" /> Banner
+        </button>
+      {/if}
       {#if running || status?.state === 'waiting'}
         <button class="btn" onclick={pause} disabled={status?.pause_requested}>
           {status?.pause_requested ? 'Pausing…' : 'Pause'}
@@ -383,6 +391,8 @@
           </div>
         {/if}
       </div>
+
+      <ProgressChart />
 
       {#if dash}
         <div class="dash-grid">
@@ -730,4 +740,7 @@
   {/if}
 
   <Diagnostics />
+  {#if bannerOpen}
+    <BannerPanel onclose={() => (bannerOpen = false)} />
+  {/if}
 </div>

@@ -26,6 +26,20 @@ export interface SettingsView {
   signed_in: boolean;
   include_family: boolean;
   keep_card_set: boolean;
+  shared_prices: boolean;
+  publishing_prices: boolean;
+  github_token_hint: string | null;
+}
+
+/** The shared price file: what this copy took from it, or published. */
+export interface SharedPrices {
+  repo: string | null;
+  enabled: boolean;
+  publishing: boolean;
+  checked_at: number | null;
+  used: { made_at: number; games: number; items: number } | null;
+  published: { at: number; games: number; items: number; bytes: number } | null;
+  error: string | null;
 }
 
 export interface AppInfo {
@@ -241,6 +255,29 @@ export interface ProgressPoint {
   value: number | null;
   cost: number | null;
   cost_points: number | null;
+  /** Missing for days recorded before 0.9.0. */
+  items_owned: number | null;
+}
+
+export interface BannerData {
+  name: string;
+  avatar: string | null;
+  percent: number | null;
+  complete: number;
+  total: number;
+  items_owned: number;
+  game_average: number | null;
+  currency: string;
+  priced: boolean;
+  value: number;
+  cost: number;
+  cost_points: number;
+  badges: number;
+  card_sets_complete: number;
+  ach_average: number | null;
+  ach_perfect: number;
+  ach_unlocked: number;
+  games: { appid: number; name: string; percent: number | null; art: string | null }[];
 }
 
 export interface Dashboard {
@@ -432,7 +469,12 @@ export const api = {
     auto_update?: boolean;
     include_family?: boolean;
     keep_card_set?: boolean;
+    shared_prices?: boolean;
   }) => invoke<SettingsView>('update_preferences', { patch }),
+  saveGithubToken: (token: string) => invoke<SettingsView>('save_github_token', { token }),
+  clearGithubToken: () => invoke<SettingsView>('clear_github_token'),
+  sharedPrices: () => invoke<SharedPrices>('get_shared_prices'),
+  publishPricesNow: () => invoke<SharedPrices>('publish_prices_now'),
   saveApiKey: (key: string) => invoke<SettingsView>('save_api_key', { key }),
   setProfile: (input: string) => invoke<ProfileCheck>('set_profile', { input }),
   startScan: (resume = false) => invoke<ScanStatus>('start_scan', { resume }),
@@ -444,6 +486,9 @@ export const api = {
   gameDetail: (appid: number) => invoke<GameDetail>('get_game_detail', { appid }),
   items: () => invoke<ItemsView>('get_items'),
   dashboard: () => invoke<Dashboard>('get_dashboard'),
+  progress: () => invoke<ProgressPoint[]>('get_progress'),
+  banner: () => invoke<BannerData>('get_banner'),
+  saveBanner: (png: string, shape: string) => invoke<string>('save_banner', { png, shape }),
   item: (key: string) => invoke<ItemDetail>('get_item', { key }),
   setItemAvailability: (appid: number, key: string, availability: Availability | null) =>
     invoke<GameDetail>('set_item_availability', { appid, key, availability }),

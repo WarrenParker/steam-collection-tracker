@@ -16,6 +16,7 @@
 
 pub mod book;
 pub mod series;
+pub mod shared;
 
 use std::collections::HashMap;
 

@@ -34,7 +34,10 @@ src-tauri/                    The engine
   src/db.rs                   The collection database: schema, saving and queries
   src/completion.rs           Completion, tags, availability, value and cost to complete
   src/prices.rs               The scan's Market stages, price history and exchange rates
-  src/market/                 Market answers, currencies, order books, price history math
+  src/shared_prices.rs        The shared price file: downloading, using and publishing it
+  src/banner.rs               Pictures for the banner, and saving it
+  src/market/                 Market answers, currencies, order books, price history math,
+                              and the shared price file's format (shared.rs)
   src/scan.rs                 The background scan, its stages, pausing and estimates
   src/session.rs              Steam sign-in, renewal and sign-out
   src/diagnostics.rs          The connection test and its report
@@ -86,7 +89,7 @@ The sign-in cookies are kept. Version 0.2.0's `cache/last_scan.json` is moved in
 | `meta` | Small values, such as which catalog route works on this connection. |
 | `owned_seen` | What the user held after the last scan that read the inventory, item by item, to compare the next scan with. |
 | `changes` | Items gained or lost between scans (copies before and after), kept for a year, for the dashboard. |
-| `progress` | The account's completion, value and cost to complete, one row a day, for the dashboard's trends. |
+| `progress` | The account's completion, items owned, value and cost to complete, one row a day, for the dashboard's trends and the progress chart. `items_owned` was added in 0.9.0 without a schema bump, so older versions can still open the database. |
 
 The schema version is kept in SQLite's `user_version`. A database the app can't read, or one written by a newer version, is renamed to `collection.old.db` and a fresh one is started; scanning again refills it.
 
@@ -129,6 +132,15 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 - **Outliers.** A listing more than three times an item's usual price (its 90-day average sale price, or its 1-year average when nothing sold in 90 days) counts at the usual price in cost to complete and value, and is marked as estimated. A background listed at $876.48 that last sold for $2.26 made up most of a real account's cost to complete before this rule.
 - **Price history** is fetched whole (Steam has no way to ask for part of it) when an item is opened, without sign-in, turned into one point per day, summarised, and stored as the last year: daily for 90 days, weekly before that, packed into a few bytes per point. "Show full history" fetches it again and shapes it for a chart (daily for 90 days, weekly for two years, then monthly).
 - **Currency.** Steam answers in the account's currency, which the app learns from the Market. Other currencies are converted with daily exchange rates from api.frankfurter.dev, read only when another currency is chosen.
+
+## Shared prices
+
+Reading every game's prices from Steam takes hours for a large library, so one copy of the app (the owner's) publishes what it has read, and every other copy starts from that.
+
+- **The file** is plain text, one record per line, gzip-compressed (about 400 KB for 5,000 items). It lists each game whose Market search finished, with when it started, and every `market` row: current price, price history summary and compact history, and order book. Columns are matched by name, so later versions can add some. The format and its checks are in `market/shared.rs`.
+- **Where it lives.** A release tagged `prices` in a separate repository, the app's own with `-prices` added (`WarrenParker/steam-collection-tracker-prices`), as `prices.txt.gz`. A separate repository means the token that publishes it can't change the app's code.
+- **Downloading.** At the start of the Market stage, at most every 6 hours, the app downloads the file from GitHub (32 MB cap, 256 MB unpacked). For the games this user prices, it keeps whichever is newer, its own or the file's, separately for the current price, the price history and the order book. A game whose search in the file is newer than the app's own is marked as searched then, so the scan skips it. Rows in another currency than the user's Market currency are skipped. A copy that publishes doesn't download.
+- **Publishing.** When a GitHub token is saved (encrypted with DPAPI, like the API key), the app publishes after a scan's Market stage finishes, at most every 20 hours, or from Settings with Publish now. It makes the release if it's missing, uploads the new file under a temporary name, removes the old one and renames the new one, so the file is only missing for a moment. The token needs Contents: Read and write on the prices repository only.
 
 ## Talking to Steam
 
@@ -174,6 +186,8 @@ Rescans only fetch what's missing or out of date: store details after 30 days, P
 - **External links:** the interface can only open https pages on Steam and GitHub (checked by parsing the address, with no user name, password or port), and only in the user's own browser.
 - **Content security policy:** the interface loads nothing from the internet except images from Steam's image servers.
 - **Updates:** only downloaded from this repository's own GitHub releases, checked against the release's SHA-256 file, and refused when far larger than the app.
+- **Shared prices:** downloaded only from the prices repository's release over https, size-capped before and after unpacking, and checked line by line: unknown formats and newer versions are refused, and a row with any value out of range is dropped whole. Stored price history must decode, and prices in another currency are skipped. The publishing token is encrypted like the API key, never reaches the interface (only its last four characters), and is meant for the prices repository alone.
+- **Banner pictures:** only fetched over https from Steam's image servers, at most 4 MB each, and handed to the interface as data URLs. Banners are only saved as PNG, to a folder in the user's Pictures.
 - **Dependencies:** `Cargo.lock` and `package-lock.json` are committed, so every build uses the same package versions. Each build runs `cargo audit` and `npm audit` and lists any advisories in the build report. The audit's remaining warnings are for Linux-only crates (`glib`, `zbus`) that the Windows app doesn't include.
 
 ## Conventions

@@ -7,11 +7,12 @@
     type AppInfo,
     type PriceWindow,
     type SettingsView,
+    type SharedPrices,
     type SignInResult,
     type Theme,
     type UpdateState,
   } from './api';
-  import { bytes } from './format';
+  import { agoUnix, bytes, num } from './format';
   import Icon from './Icon.svelte';
   import SignInButton from './SignInButton.svelte';
   import VersionHistory from './VersionHistory.svelte';
@@ -74,7 +75,7 @@
     ['C', "Copy an item's name"],
   ];
 
-  let editing = $state<'none' | 'key' | 'profile'>('none');
+  let editing = $state<'none' | 'key' | 'profile' | 'token'>('none');
   let keyInput = $state('');
   let profileInput = $state('');
   let busy = $state(false);
@@ -97,7 +98,7 @@
     }
   });
 
-  function startEditing(what: 'key' | 'profile') {
+  function startEditing(what: 'key' | 'profile' | 'token') {
     editing = editing === what ? 'none' : what;
     error = '';
     saved = '';
@@ -136,6 +137,63 @@
   }
 
   let priceBusy = $state(false);
+
+  let shared = $state<SharedPrices | null>(null);
+  let tokenInput = $state('');
+  let sharedBusy = $state(false);
+  let sharedError = $state('');
+  let sharedSaved = $state('');
+
+  onMount(() => {
+    api.sharedPrices().then((s) => (shared = s)).catch(() => {});
+  });
+
+  async function sharedAction(run: () => Promise<void>) {
+    sharedBusy = true;
+    sharedError = '';
+    sharedSaved = '';
+    try {
+      await run();
+      shared = await api.sharedPrices();
+    } catch (e) {
+      sharedError = errorText(e);
+    } finally {
+      sharedBusy = false;
+    }
+  }
+
+  const toggleShared = () =>
+    sharedAction(async () => onchange(await api.updatePreferences({ shared_prices: !settings.shared_prices })));
+
+  const saveToken = (e: SubmitEvent) => {
+    e.preventDefault();
+    return sharedAction(async () => {
+      onchange(await api.saveGithubToken(tokenInput));
+      tokenInput = '';
+      editing = 'none';
+      sharedSaved = 'Token saved. Your app will publish prices after its next scan.';
+    });
+  };
+
+  const removeToken = () => sharedAction(async () => onchange(await api.clearGithubToken()));
+
+  const publishNow = () =>
+    sharedAction(async () => {
+      shared = await api.publishPricesNow();
+      sharedSaved = 'Prices published.';
+    });
+
+  /** What the "Use shared prices" row says. */
+  function sharedText(s: SharedPrices | null): string {
+    if (settings.publishing_prices) return 'This copy publishes the shared prices, so it reads its own from Steam.';
+    if (!settings.shared_prices) return 'Off. Every price is read from Steam.';
+    const u = s?.used;
+    if (u && u.games > 0) {
+      return `${num(u.games)} games' prices came from the shared file made ${agoUnix(u.made_at)}, so Steam was only asked about the rest.`;
+    }
+    if (s?.checked_at) return 'Checked. The shared file had nothing newer for your games.';
+    return 'Games the shared file covers get their prices in seconds instead of from Steam. Checked at the start of each scan.';
+  }
 
   async function setPrices(patch: Parameters<typeof api.updatePriceSettings>[0]) {
     priceBusy = true;
@@ -487,6 +545,65 @@
           </select>
         </div>
       </div>
+      <div class="setting-row">
+        <div>
+          <div>Use shared prices</div>
+          <div class="desc">{sharedText(shared)}</div>
+        </div>
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={settings.shared_prices}
+          aria-label="Use shared prices"
+          disabled={sharedBusy || settings.publishing_prices}
+          onclick={toggleShared}
+        ></button>
+      </div>
+      {#if shared?.repo}
+        <div class="setting-row">
+          <div>
+            <div>Publish prices for friends</div>
+            <div class="desc">
+              {#if settings.publishing_prices && shared.published}
+                Published {agoUnix(shared.published.at)}: {num(shared.published.items)} items from
+                {num(shared.published.games)} games, {bytes(shared.published.bytes)}. Publishes once a day after a scan.
+              {:else if settings.publishing_prices}
+                Token saved, ends in {settings.github_token_hint}. Publishes once a day after a scan.
+              {:else}
+                For the app's owner: a GitHub token with Contents: Read and write on {shared.repo} only.
+              {/if}
+            </div>
+          </div>
+          {#if settings.publishing_prices}
+            <div class="setting-pair">
+              <button class="btn small" onclick={publishNow} disabled={sharedBusy}>
+                {sharedBusy ? 'Publishing…' : 'Publish now'}
+              </button>
+              <button class="btn small" onclick={removeToken} disabled={sharedBusy}>Remove token</button>
+            </div>
+          {:else}
+            <button class="btn small" onclick={() => startEditing('token')}>Add token</button>
+          {/if}
+        </div>
+        {#if editing === 'token'}
+          <form class="inline-form" onsubmit={saveToken}>
+            <input
+              type="password"
+              bind:value={tokenInput}
+              placeholder="github_pat_…"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button class="btn small primary" type="submit" disabled={sharedBusy}>
+              {sharedBusy ? 'Checking…' : 'Save'}
+            </button>
+          </form>
+        {/if}
+      {/if}
+      {#if sharedError || shared?.error}
+        <p class="field-error" role="alert">{sharedError || shared?.error}</p>
+      {/if}
+      {#if sharedSaved}<p class="desc good">{sharedSaved}</p>{/if}
     </section>
 
     <section class="setting-group" bind:this={updatesSection}>
